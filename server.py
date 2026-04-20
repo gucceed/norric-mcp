@@ -984,6 +984,10 @@ async def norric_status() -> dict:
     )
 
 
+# ── Provenance tools
+from tools.provenance_tools import register_provenance_tools
+register_provenance_tools(mcp)
+
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
