@@ -22,7 +22,7 @@ Authorization: Bearer nrc_your_api_key
 X-Norric-Key: nrc_your_api_key
 ```
 
-**Get a key:** https://norric.se/api
+**Get a key:** https://norric.io/api
 
 ---
 

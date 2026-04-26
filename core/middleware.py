@@ -130,7 +130,7 @@ class NorricAuthMiddleware:
                     send,
                     {
                         "error": "Tool not available on your tier",
-                        "upgrade_url": "https://norric.se/api",
+                        "upgrade_url": "https://norric.io/api",
                     },
                     403,
                 )
@@ -141,7 +141,7 @@ class NorricAuthMiddleware:
                     send,
                     {
                         "error": "Daily rate limit exceeded",
-                        "upgrade_url": "https://norric.se/api",
+                        "upgrade_url": "https://norric.io/api",
                     },
                     429,
                 )

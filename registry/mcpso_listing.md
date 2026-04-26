@@ -48,7 +48,7 @@ Kronofogden, Boverket, and Lantmäteriet.
 
 ## Get access
 
-https://norric.se/api
+https://norric.io/api
 
 ## Endpoint
 
@@ -93,4 +93,4 @@ claude mcp add norric https://norric-mcp-production.up.railway.app/mcp \
 
 ## Company
 
-Norric AB · Malmö, Sweden · norric.se
+Norric AB · Malmö, Sweden · norric.io

@@ -72,8 +72,8 @@ async def checkout(tier: str = "standard", billing: str = "monthly"):
         payment_method_types=["card"],
         line_items=[{"price": price_id, "quantity": 1}],
         mode="subscription",
-        success_url="https://norric.se/api/success?session_id={CHECKOUT_SESSION_ID}",
-        cancel_url="https://norric.se/api",
+        success_url="https://norric.io/api/success?session_id={CHECKOUT_SESSION_ID}",
+        cancel_url="https://norric.io/api",
         metadata={"tier": tier, "billing": billing},
     )
 

@@ -19,7 +19,7 @@ contractor prospecting, public sector procurement intelligence.
 
 **Company:** Norric AB, Malmö, Sweden
 **Contact:** edgar.mutebi1@gmail.com
-**Website:** norric.se
+**Website:** norric.io
 
 **Example tool call (for directory listing):**
 

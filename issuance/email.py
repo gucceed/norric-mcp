@@ -31,7 +31,7 @@ def _send_via_sendgrid(to_email: str, raw_key: str, tier: str, api_key: str) -> 
 
         body = {
             "personalizations": [{"to": [{"email": to_email}]}],
-            "from": {"email": "noreply@norric.se", "name": "Norric AB"},
+            "from": {"email": "noreply@norric.io", "name": "Norric AB"},
             "subject": f"Your Norric API key — {tier} tier",
             "content": [
                 {
@@ -45,9 +45,9 @@ def _send_via_sendgrid(to_email: str, raw_key: str, tier: str, api_key: str) -> 
                         f"  -- or --\n"
                         f"  X-Norric-Key: {raw_key}\n\n"
                         f"Endpoint: https://norric-mcp-production.up.railway.app/mcp\n\n"
-                        f"Documentation: https://norric.se/api\n\n"
+                        f"Documentation: https://norric.io/api\n\n"
                         f"Keep this key secret. Do not share it.\n"
-                        f"If it is compromised, email hej@norric.se.\n\n"
+                        f"If it is compromised, email hej@norric.io.\n\n"
                         f"Norric AB · Malmö, Sweden"
                     ),
                 }

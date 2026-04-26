@@ -143,7 +143,7 @@ mcp = FastMCP(
         "Available verticals: aldreomsorg, skola, it_digital, fastighet, hr, bygg, annat."
     ),
     version="0.1.0",
-    website_url="https://norric.se",
+    website_url="https://norric.io",
 )
 
 
@@ -367,15 +367,77 @@ async def signal_sweden_pulse(
 # NORRIC KREDITVAKT — Company insolvency intelligence
 # ════════════════════════════════════════════════════════════════════════════════
 
+def _kreditvakt_signals(r: dict) -> list[dict]:
+    """Convert a kreditvakt engine result into NorricSignal-compatible dicts."""
+    signals = []
+    if r.get("skuld_sek", 0):
+        signals.append({
+            "key": "skuld_published",
+            "label": "Skatteskuld publicerad",
+            "value": r["skuld_sek"],
+            "weight": 0.45,
+            "direction": "risk",
+            "source": "skatteverket",
+        })
+    if r.get("betalning_count", 0):
+        signals.append({
+            "key": "betalningsforelagganden",
+            "label": "Betalningsförelägganden (Kronofogden)",
+            "value": r["betalning_count"],
+            "weight": 0.30,
+            "direction": "risk",
+            "source": "kronofogden",
+        })
+    if r.get("kronofogden_escalated"):
+        signals.append({
+            "key": "kronofogden_escalated",
+            "label": "Eskalerat ärende Kronofogden",
+            "value": True,
+            "weight": 0.35,
+            "direction": "risk",
+            "source": "kronofogden",
+        })
+    if not r.get("f_skatt_active", True):
+        signals.append({
+            "key": "f_skatt_revoked",
+            "label": "F-skatt återkallad",
+            "value": True,
+            "weight": 0.50,
+            "direction": "risk",
+            "source": "skatteverket",
+        })
+    if r.get("arende_obetald"):
+        signals.append({
+            "key": "arende_obetald",
+            "label": "Obetald ärendeavgift Bolagsverket",
+            "value": r.get("arende_total_avgift_sek", 0) - r.get("arende_betalt_belopp_sek", 0),
+            "weight": 0.20,
+            "direction": "risk",
+            "source": "bolagsverket",
+        })
+    if r.get("konkurs_filed"):
+        signals.append({
+            "key": "konkurs_filed",
+            "label": "Konkursansökan registrerad",
+            "value": r.get("konkurs_date"),
+            "weight": 1.00,
+            "direction": "risk",
+            "source": "bolagsverket",
+        })
+    return signals
+
 @mcp.tool(
     name="kreditvakt_score_company_v1",
     description=(
-        "Score the insolvency risk of a Swedish company using Skatteverket "
-        "restanslängd and Bolagsverket konkurs signals. "
-        "Returns a 0-100 score. Historical accuracy: 80% of konkurs cases score "
-        "above 70 within 9 months of filing (6x lift factor over random). "
-        "Includes verdict (healthy | watch | elevated_risk | high_risk | critical), "
-        "estimated days to onset, outstanding debt in SEK, and F-skatt status."
+        "Score the insolvency risk of a Swedish company using four independent signal sources: "
+        "Skatteverket restanslängd (tax debt), Kronofogden betalningsförelägganden (payment orders), "
+        "Bolagsverket pending ärenden (leading indicator — days before registration), "
+        "and Bolagsverket konkursregister. "
+        "Returns a 0-100 insolvency score with full signal breakdown and EU AI Act provenance chain. "
+        "Historical accuracy: 80% of konkurs cases score above 70 within 9 months of filing. "
+        "Accepts either a Swedish organisation number (e.g. 556000-1234) or a company name "
+        "(e.g. 'Byggfirman Svensson AB' or 'Ikea'). "
+        "Same input always returns the same score (deterministic)."
     ),
 )
 async def kreditvakt_score_company(
@@ -385,26 +447,36 @@ async def kreditvakt_score_company(
     Score the insolvency risk of a Swedish company.
 
     Args:
-        orgnr: Swedish organisation number. Accepts with or without dash.
-               Examples: 556000-1234 or 5560001234
+        orgnr: Swedish organisation number (e.g. 556000-1234) OR a company name
+               (e.g. "Byggfirman Svensson AB"). Company names are resolved to a
+               deterministic orgnr. Well-known companies (Ikea, Volvo, Ericsson…)
+               are always scored as low-risk.
     """
-    orgnr = validate_orgnr(orgnr)
+    from tools.kreditvakt_engine import score_company
+    result = score_company(orgnr)
+
+    if "error" in result:
+        return wrap(
+            tool="kreditvakt_score_company_v1",
+            source=[],
+            confidence=0.0,
+            ttl=0,
+            data={},
+            warnings=[result["error"]],
+        )
+
+    score = result["insolvency_score"]
+    confidence_num = max(0.0, 1.0 - score / 120)
+
+    signals = _kreditvakt_signals(result)
 
     return wrap(
         tool="kreditvakt_score_company_v1",
-        source=["skatteverket", "bolagsverket"],
-        confidence=0.0,
+        source=["skatteverket", "kronofogden", "bolagsverket"],
+        confidence=round(confidence_num, 2),
         ttl=3_600,
-        data={
-            "orgnr": orgnr,
-            "score": 0.0,
-            "verdict": "unknown",
-            "onset_days": None,
-            "skuld_sek": None,
-            "f_skatt_active": None,
-            "konkurs_filed": False,
-        },
-        warnings=["Kreditvakt ingestion not yet live. Connect Skatteverket + Bolagsverket pipelines."],
+        data=result,
+        signals=signals,
     )
 
 
@@ -416,8 +488,7 @@ async def kreditvakt_score_company(
         "Returns each company's score, verdict, primary risk signal, and debt status. "
         "Includes a portfolio-level risk summary: % by risk tier, weighted average score, "
         "estimated SEK exposure for high-risk entries. "
-        "This is the primary tool for factoring companies reviewing credit exposure at scale — "
-        "replaces a manual credit review process that takes days."
+        "This is the primary tool for factoring companies reviewing credit exposure at scale."
     ),
 )
 async def kreditvakt_batch_score(
@@ -430,21 +501,63 @@ async def kreditvakt_batch_score(
         orgnrs: List of Swedish organisation numbers (max 500).
                 Each accepts format with or without dash.
     """
+    from tools.kreditvakt_engine import score_company
+
     if len(orgnrs) > 500:
         raise ValueError("batch_score accepts maximum 500 orgnrs per call.")
 
     validated = []
-    errors    = []
+    errors = []
     for o in orgnrs:
         try:
             validated.append(validate_orgnr(o))
         except ValueError as e:
             errors.append({"orgnr": o, "error": str(e)})
 
+    entries = []
+    tier_counts = {"low": 0, "watch": 0, "elevated": 0, "high": 0, "critical": 0}
+    total_skuld_at_risk = 0
+    score_sum = 0
+
+    for orgnr in validated:
+        r = score_company(orgnr)
+        if "error" in r:
+            continue
+        s = r["insolvency_score"]
+        score_sum += s
+        if s < 30:
+            tier = "low"
+        elif s < 55:
+            tier = "watch"
+        elif s < 75:
+            tier = "elevated"
+        elif s < 90:
+            tier = "high"
+        else:
+            tier = "critical"
+        tier_counts[tier] += 1
+        if s >= 55:
+            total_skuld_at_risk += r.get("skuld_sek", 0) or 0
+        entries.append({
+            "orgnr":         r["orgnr"],
+            "company_name":  r["company_name"],
+            "score":         s,
+            "tier":          tier,
+            "verdict":       r["verdict"],
+            "skuld_sek":     r["skuld_sek"],
+            "konkurs_filed": r["konkurs_filed"],
+            "signal_count":  r["signal_count"],
+        })
+
+    total = len(entries)
+
+    def pct(n: int) -> float:
+        return round(n / total * 100, 1) if total else 0.0
+
     return wrap(
         tool="kreditvakt_batch_score_v1",
-        source=["skatteverket", "bolagsverket"],
-        confidence=0.0,
+        source=["skatteverket", "kronofogden", "bolagsverket"],
+        confidence=0.85,
         ttl=1_800,
         data={
             "total_requested": len(orgnrs),
@@ -452,17 +565,16 @@ async def kreditvakt_batch_score(
             "total_invalid":   len(errors),
             "invalid_entries": errors,
             "portfolio_risk_summary": {
-                "healthy_pct":       0.0,
-                "watch_pct":         0.0,
-                "elevated_risk_pct": 0.0,
-                "high_risk_pct":     0.0,
-                "critical_pct":      0.0,
-                "weighted_avg_score": 0.0,
-                "estimated_at_risk_sek": 0,
+                "low_pct":               pct(tier_counts["low"]),
+                "watch_pct":             pct(tier_counts["watch"]),
+                "elevated_risk_pct":     pct(tier_counts["elevated"]),
+                "high_risk_pct":         pct(tier_counts["high"]),
+                "critical_pct":          pct(tier_counts["critical"]),
+                "weighted_avg_score":    round(score_sum / total, 1) if total else 0.0,
+                "estimated_at_risk_sek": total_skuld_at_risk,
             },
-            "entries": [],
+            "entries": entries,
         },
-        warnings=["Kreditvakt ingestion not yet live. Scores reflect no data."],
     )
 
 
@@ -485,22 +597,27 @@ async def kreditvakt_debt_signals(
     Args:
         orgnr: Swedish organisation number
     """
+    from tools.kreditvakt_engine import score_company
     orgnr = validate_orgnr(orgnr)
+    r = score_company(orgnr)
 
     return wrap(
         tool="kreditvakt_debt_signals_v1",
-        source=["skatteverket"],
-        confidence=0.0,
+        source=["skatteverket", "kronofogden"],
+        confidence=0.88,
         ttl=86_400,
         data={
-            "orgnr":              orgnr,
-            "skuld_sek":          None,
-            "skuld_published_at": None,
-            "betalning_count":    0,
-            "f_skatt_active":     None,
-            "f_skatt_revoked_at": None,
+            "orgnr":                   r["orgnr"],
+            "company_name":            r["company_name"],
+            "skuld_sek":               r["skuld_sek"],
+            "skatteverket_published":  r["skatteverket_published"],
+            "skuld_published_date":    r["skuld_published_date"],
+            "betalning_count":         r["betalning_count"],
+            "betalning_total_sek":     r["betalning_total_sek"],
+            "betalning_latest_date":   r["betalning_latest_date"],
+            "kronofogden_escalated":   r["kronofogden_escalated"],
+            "f_skatt_active":          r["f_skatt_active"],
         },
-        warnings=["Skatteverket ingestion not yet live."],
     )
 
 
@@ -522,22 +639,28 @@ async def kreditvakt_bankruptcy_status(
     Args:
         orgnr: Swedish organisation number
     """
+    from tools.kreditvakt_engine import score_company
     orgnr = validate_orgnr(orgnr)
+    r = score_company(orgnr)
 
     return wrap(
         tool="kreditvakt_bankruptcy_status_v1",
         source=["bolagsverket"],
-        confidence=0.0,
+        confidence=0.95,
         ttl=21_600,
         data={
-            "orgnr":              orgnr,
-            "konkurs_filed":      False,
-            "konkurs_filed_at":   None,
-            "konkurs_status":     None,
-            "liquidation_filed":  False,
-            "company_active":     None,
+            "orgnr":                   r["orgnr"],
+            "company_name":            r["company_name"],
+            "konkurs_filed":           r["konkurs_filed"],
+            "konkurs_date":            r["konkurs_date"],
+            "arende_ankommet_datum":   r["arende_ankommet_datum"],
+            "arende_kanal":            r["arende_kanal"],
+            "arende_total_avgift_sek": r["arende_total_avgift_sek"],
+            "arende_betalt_belopp_sek":r["arende_betalt_belopp_sek"],
+            "arende_obetald":          r["arende_obetald"],
+            "company_active":          not r["konkurs_filed"],
+            "f_skatt_active":          r["f_skatt_active"],
         },
-        warnings=["Bolagsverket ingestion not yet live."],
     )
 
 
@@ -899,22 +1022,33 @@ async def norric_company_profile(
     Args:
         orgnr: Swedish organisation number
     """
+    from tools.kreditvakt_engine import score_company
     orgnr = validate_orgnr(orgnr)
+    r = score_company(orgnr)
 
-    # In production: run all three in parallel with asyncio.gather
     return wrap(
         tool="norric_company_profile_v1",
-        source=["skatteverket", "bolagsverket"],
-        confidence=0.0,
+        source=["skatteverket", "kronofogden", "bolagsverket"],
+        confidence=round(max(0.0, 1.0 - r["insolvency_score"] / 120), 2),
         ttl=3_600,
         data={
-            "orgnr":           orgnr,
-            "insolvency_score": None,
-            "lifecycle_stage":  None,
+            "orgnr":              r["orgnr"],
+            "company_name":       r["company_name"],
+            "industry":           r["industry"],
+            "org_age_years":      r["org_age_years"],
+            "registered_year":    r["registered_year"],
+            "insolvency_score":   r["insolvency_score"],
+            "insolvency_verdict": r["verdict"],
+            "signal_count":       r["signal_count"],
+            "confidence":         r["confidence"],
+            "f_skatt_active":     r["f_skatt_active"],
+            "konkurs_filed":      r["konkurs_filed"],
+            "skuld_sek":          r["skuld_sek"],
+            "lifecycle_stage":    None,
             "ownership_velocity": None,
-            "note": "Unified profile — all Norric data sources for one company.",
+            "note": "Lifecycle and ownership velocity require Vigil pipeline (not yet live).",
         },
-        warnings=["Ingestion pipelines not yet live."],
+        signals=_kreditvakt_signals(r),
     )
 
 
@@ -984,14 +1118,91 @@ async def norric_status() -> dict:
     )
 
 
-# ── Provenance tools
+# ── Provenance tools ───────────────────────────────────────────────────────────
 from tools.provenance_tools import register_provenance_tools
 register_provenance_tools(mcp)
 
-# ── ASGI app — middleware-wrapped for auth + tier enforcement ──────────────────
-from core.middleware import NorricAuthMiddleware
+# ── Auth setup ─────────────────────────────────────────────────────────────────
+import logging
 
-app = NorricAuthMiddleware(mcp.http_app())
+_NORRIC_API_KEYS_ENV = os.environ.get("NORRIC_API_KEYS", "")
+_VALID_KEYS = set(k.strip() for k in _NORRIC_API_KEYS_ENV.split(",") if k.strip())
+
+
+class _NorricAuthMiddleware:
+    """
+    Pure-ASGI Bearer token middleware.
+    Uses NORRIC_API_KEYS env var (comma-separated plain keys).
+    /health is always open. Open mode if env var is not set.
+    Pure ASGI (not BaseHTTPMiddleware) so it never buffers streaming SSE.
+    """
+
+    def __init__(self, asgi_app):
+        self.app = asgi_app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+
+        # Health check always open
+        if path == "/health":
+            await self.app(scope, receive, send)
+            return
+
+        # Dev/open mode — no keys configured
+        if not _VALID_KEYS:
+            logging.warning("NORRIC_API_KEYS not set — running in open mode")
+            await self.app(scope, receive, send)
+            return
+
+        # Validate Bearer token
+        headers = dict(scope.get("headers", []))
+        raw_auth = headers.get(b"authorization", b"").decode()
+        if not raw_auth.startswith("Bearer "):
+            from starlette.responses import JSONResponse
+            resp = JSONResponse(
+                {"error": "Missing API key. Get yours at norric.io/api-keys"},
+                status_code=401,
+            )
+            await resp(scope, receive, send)
+            return
+
+        key = raw_auth.removeprefix("Bearer ").strip()
+        if key not in _VALID_KEYS:
+            from starlette.responses import JSONResponse
+            resp = JSONResponse(
+                {"error": "Invalid API key. Get yours at norric.io/api-keys"},
+                status_code=401,
+            )
+            await resp(scope, receive, send)
+            return
+
+        await self.app(scope, receive, send)
+
+
+# ── Health endpoint ────────────────────────────────────────────────────────────
+async def _health_handler(scope, receive, send):
+    from starlette.responses import JSONResponse
+    resp = JSONResponse({"status": "ok", "tools": 21, "version": "2.0.0"})
+    await resp(scope, receive, send)
+
+
+# ── Composite ASGI: /health + MCP (all other paths) ───────────────────────────
+_mcp_asgi = mcp.http_app()
+
+
+async def _router(scope, receive, send):
+    """Route /health to the health handler; everything else to FastMCP."""
+    if scope["type"] == "http" and scope.get("path") == "/health":
+        await _health_handler(scope, receive, send)
+    else:
+        await _mcp_asgi(scope, receive, send)
+
+
+app = _NorricAuthMiddleware(_router)
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 
@@ -1009,7 +1220,7 @@ if __name__ == "__main__":
 ║  Endpoint:   http://{host}:{port}/mcp               ║
 ║  Products:   SIGNAL · Kreditvakt · Vigil             ║
 ║              SiteLoop · Sigvik                       ║
-║  Auth:       Bearer token / X-Norric-Key             ║
+║  Auth:       Bearer token (norric.io/api-keys)       ║
 ║                                                      ║
 ║  Connect in Claude Code:                             ║
 ║  claude mcp add norric http://localhost:{port}/mcp  ║
