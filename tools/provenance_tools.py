@@ -30,8 +30,11 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional
+
+log = logging.getLogger(__name__)
 
 from core.provenance import (
     Agency,
@@ -45,43 +48,123 @@ from shared.schemas.agency import AGENCY_REGISTRY, get_stale_days
 
 
 # ---------------------------------------------------------------------------
-# In-memory pipeline registry (replace with DB queries in production)
+# Supabase client (lazy singleton)
 # ---------------------------------------------------------------------------
-#
-# In production, these records are fetched from the database:
-#   SELECT source_agency, MAX(ingested_at), COUNT(*) FROM provenance_records
-#   GROUP BY source_agency
-#
-# For now, a stub that returns realistic data structure. Wire to DB in Step 4.
+
+_supabase_client = None
+
+
+def _get_supabase():
+    """Lazy-initialise the Supabase client. Returns None if not configured."""
+    global _supabase_client
+    if _supabase_client is not None:
+        return _supabase_client
+
+    url = os.environ.get("SUPABASE_URL", "")
+    key = os.environ.get("SUPABASE_KEY", "")
+    if not url or not key:
+        log.warning("SUPABASE_URL or SUPABASE_KEY not set — provenance queries will return empty")
+        return None
+
+    try:
+        from supabase import create_client
+        _supabase_client = create_client(url, key)
+        return _supabase_client
+    except Exception as exc:
+        log.error(f"Supabase client init failed: {exc}")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# DB query helpers
+# ---------------------------------------------------------------------------
 
 def _get_pipeline_freshness_from_db(agencies: list[str] | None = None) -> list[dict]:
     """
-    Stub: replace with actual DB query.
-
-    SELECT
-        source_agency,
-        MAX(ingested_at) AS last_ingestion,
-        COUNT(*) AS record_count,
-        MIN(ingested_at) AS first_ingestion
+    SELECT source_agency, MAX(ingested_at) AS last_ingestion,
+           COUNT(*) AS record_count, MIN(ingested_at) AS first_ingestion
     FROM provenance_records
     WHERE source_agency = ANY(:agencies) OR :agencies IS NULL
     GROUP BY source_agency
     """
-    # Stub returns empty list — real implementation queries provenance_records table
-    return []
+    client = _get_supabase()
+    if client is None:
+        return []
+
+    try:
+        query = (
+            client.table("provenance_records")
+            .select("source_agency, ingested_at")
+        )
+        if agencies:
+            query = query.in_("source_agency", agencies)
+
+        result = query.execute()
+        rows = result.data or []
+
+        # Group by source_agency in Python (Supabase JS SDK doesn't do GROUP BY natively)
+        from collections import defaultdict
+        grouped: dict[str, list] = defaultdict(list)
+        for row in rows:
+            grouped[row["source_agency"]].append(row["ingested_at"])
+
+        records = []
+        for agency_id, timestamps in grouped.items():
+            parsed = [datetime.fromisoformat(t) for t in timestamps if t]
+            if not parsed:
+                continue
+            records.append({
+                "source_agency":  agency_id,
+                "last_ingestion":  max(parsed),
+                "first_ingestion": min(parsed),
+                "record_count":    len(parsed),
+            })
+        return records
+
+    except Exception as exc:
+        log.error(f"Pipeline freshness query failed: {exc}")
+        return []
 
 
 def _get_provenance_chain_from_db(tool_name: str, record_id: str) -> list[NorricProvenance]:
     """
-    Stub: replace with actual DB query.
-
     SELECT * FROM provenance_records
-    WHERE tool_name = :tool_name
-    AND entity_id = :record_id
-    ORDER BY ingested_at DESC
+    WHERE tool_name = :tool_name AND entity_id = :record_id
+    ORDER BY ingested_at DESC LIMIT 20
     """
-    # Stub returns empty list — real implementation queries provenance_records table
-    return []
+    client = _get_supabase()
+    if client is None:
+        return []
+
+    try:
+        result = (
+            client.table("provenance_records")
+            .select("*")
+            .eq("tool_name", tool_name)
+            .eq("entity_id", record_id)
+            .order("ingested_at", desc=True)
+            .limit(20)
+            .execute()
+        )
+        rows = result.data or []
+        chain = []
+        for row in rows:
+            try:
+                chain.append(NorricProvenance(
+                    source_agency=row["source_agency"],
+                    source_document_ref=row["source_document_ref"],
+                    ingested_at=datetime.fromisoformat(row["ingested_at"]),
+                    confidence=float(row["confidence"]),
+                    raw_url=row.get("raw_url"),
+                    schema_version=row.get("schema_version", "1.0"),
+                ))
+            except Exception as exc:
+                log.warning(f"Skipping malformed provenance row {row.get('id')}: {exc}")
+        return chain
+
+    except Exception as exc:
+        log.error(f"Provenance chain query failed for {record_id}/{tool_name}: {exc}")
+        return []
 
 
 # ---------------------------------------------------------------------------
