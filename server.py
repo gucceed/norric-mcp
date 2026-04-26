@@ -988,9 +988,16 @@ async def norric_status() -> dict:
 from tools.provenance_tools import register_provenance_tools
 register_provenance_tools(mcp)
 
+# ── ASGI app — middleware-wrapped for auth + tier enforcement ──────────────────
+from core.middleware import NorricAuthMiddleware
+
+app = NorricAuthMiddleware(mcp.http_app())
+
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    import uvicorn
+
     port = int(os.environ.get("PORT", 8080))
     host = os.environ.get("HOST", "0.0.0.0")
 
@@ -1002,15 +1009,11 @@ if __name__ == "__main__":
 ║  Endpoint:   http://{host}:{port}/mcp               ║
 ║  Products:   SIGNAL · Kreditvakt · Vigil             ║
 ║              SiteLoop · Sigvik                       ║
-║  Tools:      {len([t for t in dir(mcp) if not t.startswith('_')])} registered                          ║
+║  Auth:       Bearer token / X-Norric-Key             ║
 ║                                                      ║
 ║  Connect in Claude Code:                             ║
 ║  claude mcp add norric http://localhost:{port}/mcp  ║
 ╚══════════════════════════════════════════════════════╝
 """)
 
-    mcp.run(
-        transport="streamable-http",
-        host=host,
-        port=port,
-    )
+    uvicorn.run(app, host=host, port=port, log_level="info")
