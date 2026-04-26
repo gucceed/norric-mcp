@@ -1,10 +1,40 @@
 # Norric Intelligence MCP Server
 
+[![MCP](https://img.shields.io/badge/MCP-Streamable_HTTP-blue)](https://norric-mcp-production.up.railway.app/mcp)
+
 Sweden's B2B intelligence infrastructure — exposed as a single MCP server.
 
-**Products:** Norric SIGNAL · Norric Kreditvakt · Norric Vigil · SiteLoop · Sigvik  
-**Framework:** FastMCP 3.2.3 · Streamable HTTP transport  
-**Tools:** 19 tools across 5 products + 2 cross-portfolio tools
+**Products:** Norric SIGNAL · Norric Kreditvakt · Norric Vigil · SiteLoop · Sigvik
+**Framework:** FastMCP 3.2.3 · Streamable HTTP transport
+**Tools:** 21 tools across 5 products
+
+---
+
+## Authentication
+
+Every tool call requires an API key. The initialize handshake is open (no key needed for that step).
+
+```bash
+# Option 1 — Authorization header
+Authorization: Bearer nrc_your_api_key
+
+# Option 2 — Norric header
+X-Norric-Key: nrc_your_api_key
+```
+
+**Get a key:** https://norric.se/api
+
+---
+
+## Pricing
+
+| Tier | Tools | Daily limit | Price |
+|------|-------|-------------|-------|
+| **Free** | `norric_status_v1`, `norric_explain_score_v1`, `norric_data_freshness_v1` | 100 calls/day | Free |
+| **Standard** | All 21 tools | 10,000 calls/day | 2,900 SEK/month |
+| **Compliance** | All 21 tools + audit rights | Unlimited | 9,900 SEK/month |
+
+Annual plans: Standard 29,000 SEK/year · Compliance 99,000 SEK/year
 
 ---
 
@@ -12,7 +42,8 @@ Sweden's B2B intelligence infrastructure — exposed as a single MCP server.
 
 ### Claude Code (CLI)
 ```bash
-claude mcp add norric https://norric-mcp.up.railway.app/mcp
+claude mcp add norric https://norric-mcp-production.up.railway.app/mcp \
+  --header "Authorization: Bearer nrc_your_api_key"
 ```
 
 ### Claude Desktop (`~/Library/Application Support/Claude/claude_desktop_config.json`)
@@ -20,8 +51,11 @@ claude mcp add norric https://norric-mcp.up.railway.app/mcp
 {
   "mcpServers": {
     "norric": {
-      "url": "https://norric-mcp.up.railway.app/mcp",
-      "transport": "streamable-http"
+      "url": "https://norric-mcp-production.up.railway.app/mcp",
+      "transport": "streamable-http",
+      "headers": {
+        "Authorization": "Bearer nrc_your_api_key"
+      }
     }
   }
 }
@@ -32,7 +66,10 @@ claude mcp add norric https://norric-mcp.up.railway.app/mcp
 {
   "mcpServers": {
     "norric": {
-      "url": "https://norric-mcp.up.railway.app/mcp"
+      "url": "https://norric-mcp-production.up.railway.app/mcp",
+      "headers": {
+        "Authorization": "Bearer nrc_your_api_key"
+      }
     }
   }
 }
@@ -41,8 +78,9 @@ claude mcp add norric https://norric-mcp.up.railway.app/mcp
 ### Local development
 ```bash
 python server.py
-# Server starts at http://localhost:8000/mcp
-claude mcp add norric http://localhost:8000/mcp
+# Server starts at http://localhost:8080/mcp
+claude mcp add norric http://localhost:8080/mcp \
+  --header "Authorization: Bearer nrc_your_api_key"
 ```
 
 ---
@@ -66,7 +104,7 @@ claude mcp add norric http://localhost:8000/mcp
 | `kreditvakt_debt_signals_v1` | Skatteverket restanslängd data |
 | `kreditvakt_bankruptcy_status_v1` | Bolagsverket konkurs status |
 
-### Norric Vigil — Company lifecycle detection  
+### Norric Vigil — Company lifecycle detection
 | Tool | Description |
 |------|-------------|
 | `vigil_lifecycle_stage_v1` | early / growth / scaling / distress |
@@ -91,6 +129,8 @@ claude mcp add norric http://localhost:8000/mcp
 |------|-------------|
 | `norric_company_profile_v1` | Unified profile: Kreditvakt + Vigil in one call |
 | `norric_status_v1` | Live status of all products and data pipelines |
+| `norric_explain_score_v1` | EU AI Act provenance chain for any score |
+| `norric_data_freshness_v1` | Data freshness per source registry |
 
 ---
 
@@ -105,7 +145,7 @@ Every tool returns the same structure:
     "response_id": "nrsp_abc123",
     "tool": "tool_name_v1",
     "source": ["skatteverket", "bolagsverket"],
-    "fetched_at": "2026-04-13T10:00:00Z",
+    "fetched_at": "2026-04-26T10:00:00Z",
     "confidence": 0.91,
     "cache_ttl_seconds": 3600
   },
@@ -123,9 +163,33 @@ Every tool returns the same structure:
 }
 ```
 
-`metadata.confidence` (0-1): how much to trust the data  
-`metadata.cache_ttl_seconds`: how long before re-fetching  
+`metadata.confidence` (0-1): how much to trust the data
+`metadata.cache_ttl_seconds`: how long before re-fetching
 `signals[]`: always present, empty list if not applicable
+
+---
+
+## Two-step handshake
+
+MCP requires initializing a session before calling tools:
+
+```bash
+# Step 1: Initialize (no auth required)
+SESSION=$(curl -si \
+  -X POST https://norric-mcp-production.up.railway.app/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}' \
+  | grep -i "mcp-session-id" | awk '{print $2}' | tr -d '\r')
+
+# Step 2: Call a tool (auth required)
+curl -s -X POST https://norric-mcp-production.up.railway.app/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Authorization: Bearer nrc_your_api_key" \
+  -H "mcp-session-id: $SESSION" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"norric_status_v1","arguments":{}}}'
+```
 
 ---
 
@@ -134,20 +198,34 @@ Every tool returns the same structure:
 Tools are live and callable. Ingestion pipelines are the next build step —
 connect each product's data source to activate live scoring.
 
-Check live status: call `norric_status_v1` with no arguments.
+Check live status: call `norric_status_v1`.
 
 ---
 
 ## Deploy to Railway
 
 ```bash
-# Push to GitHub, connect repo in Railway
-# Set environment variables:
-PORT=8000
-HOST=0.0.0.0
+# MCP server service (existing — daring-adaptation or similar):
+# Start command: python server.py
+# Env vars:
+#   PORT=8080
+#   NORRIC_API_KEYS=<hash:tier:label lines>
+#   SUPABASE_URL=<your supabase url>
+#   SUPABASE_KEY=<your supabase anon key>
 
-# Railway auto-detects requirements.txt and runs:
-# python server.py
+# Key issuance service (separate Railway service):
+# Start command: uvicorn issuance.main:app --host 0.0.0.0 --port $PORT
+# Env vars: STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_*,
+#           SENDGRID_API_KEY, RAILWAY_API_TOKEN, RAILWAY_SERVICE_ID
 ```
+
+---
+
+## Registry
+
+- mcp.so listing: `registry/mcpso_listing.md`
+- Anthropic connector directory: `registry/anthropic_connector_submission.md`
+
+---
 
 ## Norric AB · Malmö · 2026
