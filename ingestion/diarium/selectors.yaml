@@ -1,0 +1,34 @@
+# Diarium platform selectors — configurable without redeployment.
+# Selectors are CSS/XPath strings. Calibrate against live municipality sites.
+
+platina:
+  case_list:    "table.diarieRows tr, div.diarieRow"
+  case_id:      "td.diarienummer, span.diarienummer"
+  title:        "td.rubrik, span.rubrik"
+  filed_at:     "td.inkommetDatum, span.inkommetDatum"
+  handling_unit: "td.handlaggare, span.handlaggare"
+  next_page:    "a.next, a[rel='next']"
+
+evolution:
+  case_list:    ".search-result tr[data-id], .result-list li"
+  case_id:      ".ref-id, .case-number"
+  title:        ".title, .subject"
+  filed_at:     ".date, .filed-date"
+  handling_unit: ".unit, .department"
+  next_page:    ".pagination a.next"
+
+lex:
+  case_list:    "li.lex-case, div.case-item"
+  case_id:      ".lex-ref, .case-id"
+  title:        ".lex-title, h3"
+  filed_at:     ".lex-date"
+  handling_unit: ".lex-unit"
+  next_page:    "a.lex-next"
+
+ephorte:
+  case_list:    "table#MainTable tr.row, .ephorte-row"
+  case_id:      "td.JournalNumber, .ephorte-id"
+  title:        "td.Title, .ephorte-title"
+  filed_at:     "td.ReceivedDate, .ephorte-date"
+  handling_unit: "td.Department, .ephorte-dept"
+  next_page:    "a#nextPage, .pager a.next"
