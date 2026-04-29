@@ -64,4 +64,40 @@ beat_schedule = {
         "schedule": crontab(hour=2, minute=0),
         "options": {"timezone": "Europe/Stockholm"},
     },
+
+    # ── T2: Kreditvakt scoring ─────────────────────────────────────────────────
+    # Rescore all tracked companies nightly after T1 ingestion completes
+    "kreditvakt-nightly-rescore": {
+        "task": "kreditvakt.tasks.score_portfolio",
+        "schedule": crontab(hour=5, minute=30),
+        "kwargs": {"orgnr_list": []},  # empty list triggers full DB rescore via worker
+        "options": {"timezone": "Europe/Stockholm"},
+    },
+    # Daily briefing — 07:00 CET
+    "kreditvakt-daily-briefing": {
+        "task": "kreditvakt.tasks.send_daily_briefing",
+        "schedule": crontab(hour=7, minute=0),
+        "options": {"timezone": "Europe/Stockholm"},
+    },
+
+    # ── T2: Vigil lifecycle detection ─────────────────────────────────────────
+    # F-skatt registrations — nightly after Bolagsverket bulk
+    "vigil-fskatt-nightly": {
+        "task": "vigil.tasks.detect_fskatt_registrations",
+        "schedule": crontab(hour=4, minute=0),
+        "options": {"timezone": "Europe/Stockholm"},
+    },
+    # Building permits (Malmö) — nightly
+    "vigil-permits-nightly": {
+        "task": "vigil.tasks.detect_building_permits",
+        "schedule": crontab(hour=3, minute=30),
+        "kwargs": {"days_back": 7},
+        "options": {"timezone": "Europe/Stockholm"},
+    },
+    # Ownership change velocity — weekly (snapshots accumulate slowly)
+    "vigil-ownership-weekly": {
+        "task": "vigil.tasks.detect_ownership_changes",
+        "schedule": crontab(day_of_week=0, hour=3, minute=0),
+        "options": {"timezone": "Europe/Stockholm"},
+    },
 }

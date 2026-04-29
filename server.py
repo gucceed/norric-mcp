@@ -433,11 +433,10 @@ def _kreditvakt_signals(r: dict) -> list[dict]:
         "Skatteverket restanslängd (tax debt), Kronofogden betalningsförelägganden (payment orders), "
         "Bolagsverket pending ärenden (leading indicator — days before registration), "
         "and Bolagsverket konkursregister. "
-        "Returns a 0-100 insolvency score with full signal breakdown and EU AI Act provenance chain. "
-        "Historical accuracy: 80% of konkurs cases score above 70 within 9 months of filing. "
-        "Accepts either a Swedish organisation number (e.g. 556000-1234) or a company name "
-        "(e.g. 'Byggfirman Svensson AB' or 'Ikea'). "
-        "Same input always returns the same score (deterministic)."
+        "Returns distress_probability [0.0–1.0], risk_band [1–5], and full signal breakdown. "
+        "score_source='live' means DB-backed signals. score_source='mock' means deterministic fallback "
+        "(company not yet ingested). stale_data=true means freshness > 48h. "
+        "Accepts either a Swedish organisation number (e.g. 556000-1234) or a company name."
     ),
 )
 async def kreditvakt_score_company(
@@ -452,8 +451,7 @@ async def kreditvakt_score_company(
                deterministic orgnr. Well-known companies (Ikea, Volvo, Ericsson…)
                are always scored as low-risk.
     """
-    from tools.kreditvakt_engine import score_company
-    result = score_company(orgnr)
+    result = _score_with_live_fallback(orgnr)
 
     if "error" in result:
         return wrap(
@@ -465,8 +463,13 @@ async def kreditvakt_score_company(
             warnings=[result["error"]],
         )
 
-    score = result["insolvency_score"]
+    score = result.get("insolvency_score", 0)
     confidence_num = max(0.0, 1.0 - score / 120)
+    warnings = []
+    if result.get("stale_data"):
+        warnings.append(f"Data freshness {result.get('data_freshness_hours', '?')}h — exceeds 48h threshold")
+    if result.get("score_source") == "mock":
+        warnings.append("Score derived from deterministic model — company not yet in live ingestion pipeline")
 
     signals = _kreditvakt_signals(result)
 
@@ -475,9 +478,38 @@ async def kreditvakt_score_company(
         source=["skatteverket", "kronofogden", "bolagsverket"],
         confidence=round(confidence_num, 2),
         ttl=3_600,
-        data=result,
+        data={
+            **result,
+            "scored_at": result.get("scored_at"),
+            "data_freshness_hours": result.get("data_freshness_hours"),
+        },
         signals=signals,
+        warnings=warnings,
     )
+
+
+def _score_with_live_fallback(orgnr_or_name: str) -> dict:
+    """Try live DB scorer first; fall back to mock if DB unavailable."""
+    try:
+        from ingestion.db import Session
+        from scoring.kreditvakt import score_from_db
+        db = Session()
+        try:
+            return score_from_db(db, orgnr_or_name)
+        finally:
+            db.close()
+    except Exception:
+        # DB not available or company is a name lookup — use mock
+        from tools.kreditvakt_engine import score_company
+        r = score_company(orgnr_or_name)
+        if "error" not in r:
+            r["score_source"] = "mock"
+            r["scored_at"] = datetime.now(timezone.utc).isoformat()
+            r["data_freshness_hours"] = None
+            r["stale_data"] = True
+            r["distress_probability"] = round(r.get("insolvency_score", 0) / 100, 4)
+            r["risk_band"] = max(1, min(5, r.get("insolvency_score", 0) // 20 + 1))
+        return r
 
 
 @mcp.tool(
@@ -892,21 +924,26 @@ async def siteloop_submit_lead(
 # SIGVIK — BRF property intelligence
 # ════════════════════════════════════════════════════════════════════════════════
 
+_SIGVIK_API_URL = os.environ.get("SIGVIK_API_URL", "http://localhost:8000")
+
+
 @mcp.tool(
     name="sigvik_score_brf_v1",
     description=(
-        "Score the financial health and risk profile of a Swedish BRF "
+        "Score the financial health and renovation intent of a Swedish BRF "
         "(bostadsrättsförening / housing cooperative). "
         "Combines avgift trend, annual report analysis, renovation risk, and "
-        "EU energy class (E/F/G class must reach D by 2033) into a 0-100 health score. "
-        "Used by mortgage pre-approval agents, mäklare, and buyer-side research agents."
+        "EU energy class (E/F/G class must reach D by 2033) into a 0-100 intent score. "
+        "Returns confidence_label (Starkt signal / Måttlig signal / Tidig indikation), "
+        "scored_at timestamp, and data_freshness_hours. "
+        "stale_data=true if score older than 48h."
     ),
 )
 async def sigvik_score_brf(
     brf_id: str,
 ) -> dict:
     """
-    Score a BRF's financial health.
+    Score a BRF's financial health and renovation intent.
 
     Args:
         brf_id: BRF identifier (orgnr format: e.g. 716400-1234)
@@ -914,20 +951,83 @@ async def sigvik_score_brf(
     try:
         brf_id = validate_orgnr(brf_id)
     except ValueError:
-        pass  # brf_id may use different format in early stage
+        pass
+
+    import httpx as _httpx
+    try:
+        async with _httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(f"{_SIGVIK_API_URL}/api/brfs/{brf_id}")
+            if resp.status_code == 404:
+                return wrap(
+                    tool="sigvik_score_brf_v1",
+                    source=["sigvik_internal"],
+                    confidence=0.0,
+                    ttl=3_600,
+                    data={"brf_id": brf_id},
+                    warnings=[f"BRF {brf_id} not found in Sigvik database"],
+                )
+            resp.raise_for_status()
+            brf_data = resp.json()
+    except Exception as e:
+        return wrap(
+            tool="sigvik_score_brf_v1",
+            source=["sigvik_internal"],
+            confidence=0.0,
+            ttl=300,
+            data={"brf_id": brf_id},
+            warnings=[f"Sigvik API unavailable: {type(e).__name__}"],
+        )
+
+    brf = brf_data.get("brf", {})
+    score = brf.get("intent_score")
+    confidence = brf.get("intent_score_confidence")
+    updated_at = brf.get("intent_score_updated_at")
+
+    freshness_hours = None
+    stale = False
+    if updated_at:
+        try:
+            from datetime import datetime as _dt
+            updated = _dt.fromisoformat(updated_at.replace("Z", "+00:00"))
+            delta = _dt.now(timezone.utc) - updated.replace(tzinfo=timezone.utc)
+            freshness_hours = round(delta.total_seconds() / 3600, 1)
+            stale = freshness_hours > 48
+        except Exception:
+            pass
+
+    confidence_label = (
+        "Starkt signal" if (confidence or 0) >= 0.7 else
+        "Måttlig signal" if (confidence or 0) >= 0.4 else
+        "Tidig indikation"
+    )
+
+    warnings = []
+    if stale:
+        warnings.append(f"Score data is {freshness_hours}h old — exceeds 48h threshold")
+    if score is None:
+        warnings.append("BRF not yet scored — ingestion may still be running")
 
     return wrap(
         tool="sigvik_score_brf_v1",
         source=["bolagsverket", "boverket", "sigvik_internal"],
-        confidence=0.0,
+        confidence=round(confidence or 0.0, 2),
         ttl=86_400,
         data={
-            "brf_id":      brf_id,
-            "score":       0.0,
-            "risk_tier":   "unknown",
-            "components":  [],
+            "brf_id": brf_id,
+            "name": brf.get("name"),
+            "city": brf.get("city"),
+            "score": score,
+            "confidence_label": confidence_label,
+            "signals_fired_count": brf_data.get("signals_fired_count"),
+            "signals_total_count": 6,
+            "scored_at": updated_at,
+            "data_freshness_hours": freshness_hours,
+            "stale_data": stale,
+            "building_year": brf.get("building_year"),
+            "num_apartments": brf.get("num_apartments"),
+            "num_arsredovisningar": brf.get("num_arsredovisningar_ingested"),
         },
-        warnings=["Sigvik BRF scoring pipeline not yet connected."],
+        warnings=warnings,
     )
 
 
@@ -1186,7 +1286,65 @@ class _NorricAuthMiddleware:
 # ── Health endpoint ────────────────────────────────────────────────────────────
 async def _health_handler(scope, receive, send):
     from starlette.responses import JSONResponse
-    resp = JSONResponse({"status": "ok", "tools": 21, "version": "2.0.0"})
+
+    health = {"status": "ok", "mcp_tools": 21, "version": "2.0.0"}
+
+    # Query DB for product health stats
+    try:
+        from ingestion.db import Session
+        from sqlalchemy import text as sqla_text
+
+        db = Session()
+        try:
+            # Kreditvakt
+            kv_row = db.execute(sqla_text("""
+                SELECT COUNT(*) AS tracked, MAX(scored_at) AS last_scored
+                FROM company_scores
+            """)).fetchone()
+
+            # Vigil
+            vigil_row = db.execute(sqla_text("""
+                SELECT COUNT(*) AS active_events
+                FROM vigil_events
+                WHERE detected_at >= now() - interval '30 days'
+            """)).fetchone()
+
+            vigil_ingested = db.execute(sqla_text("""
+                SELECT MAX(detected_at) AS last_ingested FROM vigil_events
+            """)).fetchone()
+
+            health["products"] = {
+                "kreditvakt": {
+                    "tracked_companies": int(kv_row.tracked) if kv_row else 0,
+                    "last_scored": kv_row.last_scored.isoformat() if kv_row and kv_row.last_scored else None,
+                },
+                "vigil": {
+                    "active_events_30d": int(vigil_row.active_events) if vigil_row else 0,
+                    "last_ingested": vigil_ingested.last_ingested.isoformat()
+                        if vigil_ingested and vigil_ingested.last_ingested else None,
+                },
+            }
+        finally:
+            db.close()
+    except Exception as e:
+        health["db_error"] = str(e)
+
+    # Query Sigvik API for BRF stats
+    try:
+        import httpx as _httpx
+        sigvik_url = os.environ.get("SIGVIK_API_URL", "")
+        if sigvik_url:
+            r = _httpx.get(f"{sigvik_url}/api/health", timeout=3)
+            if r.status_code == 200:
+                sigvik_health = r.json()
+                health.setdefault("products", {})["sigvik"] = {
+                    "scored_brfs": sigvik_health.get("scored_brfs"),
+                    "last_scored": sigvik_health.get("last_scored"),
+                }
+    except Exception:
+        pass
+
+    resp = JSONResponse(health)
     await resp(scope, receive, send)
 
 
