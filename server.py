@@ -463,8 +463,11 @@ async def kreditvakt_score_company(
             warnings=[result["error"]],
         )
 
-    score = result.get("insolvency_score", 0)
-    confidence_num = max(0.0, 1.0 - score / 120)
+    from scoring.display import to_display
+    p = result.get("distress_probability", 0.0)
+    ds, _ = to_display(p, last_displayed_band=result.get("last_displayed_band"))
+
+    confidence_num = max(0.0, 1.0 - p)
     warnings = []
     if result.get("stale_data"):
         warnings.append(f"Data freshness {result.get('data_freshness_hours', '?')}h — exceeds 48h threshold")
@@ -480,7 +483,15 @@ async def kreditvakt_score_company(
         ttl=3_600,
         data={
             **result,
-            "scored_at": result.get("scored_at"),
+            # v2.1 display fields (additive)
+            "display_score": ds.display_score,
+            "band":          ds.band,
+            "band_label":    ds.band_label,
+            "band_action":   ds.band_action,
+            # deprecated aliases (sunset 2027-05) — use display_score/band instead
+            "insolvency_score": result.get("insolvency_score"),
+            "risk_band":        result.get("risk_band"),
+            "scored_at":        result.get("scored_at"),
             "data_freshness_hours": result.get("data_freshness_hours"),
         },
         signals=signals,
@@ -509,6 +520,7 @@ def _score_with_live_fallback(orgnr_or_name: str) -> dict:
             r["stale_data"] = True
             r["distress_probability"] = round(r.get("insolvency_score", 0) / 100, 4)
             r["risk_band"] = max(1, min(5, r.get("insolvency_score", 0) // 20 + 1))
+            r["last_displayed_band"] = None
         return r
 
 
@@ -551,34 +563,42 @@ async def kreditvakt_batch_score(
     total_skuld_at_risk = 0
     score_sum = 0
 
+    from scoring.display import to_display
+
     for orgnr in validated:
         r = score_company(orgnr)
         if "error" in r:
             continue
-        s = r["insolvency_score"]
-        score_sum += s
-        if s < 30:
+        p = round(r.get("insolvency_score", 0) / 100, 4)
+        ds, _ = to_display(p)
+        score_sum += ds.display_score
+        band = ds.band
+        if band == 1:
             tier = "low"
-        elif s < 55:
+        elif band == 2:
             tier = "watch"
-        elif s < 75:
+        elif band == 3:
             tier = "elevated"
-        elif s < 90:
+        elif band == 4:
             tier = "high"
         else:
             tier = "critical"
         tier_counts[tier] += 1
-        if s >= 55:
+        if band >= 3:
             total_skuld_at_risk += r.get("skuld_sek", 0) or 0
         entries.append({
             "orgnr":         r["orgnr"],
             "company_name":  r["company_name"],
-            "score":         s,
+            "display_score": ds.display_score,
+            "band":          ds.band,
+            "band_label":    ds.band_label,
             "tier":          tier,
             "verdict":       r["verdict"],
             "skuld_sek":     r["skuld_sek"],
             "konkurs_filed": r["konkurs_filed"],
             "signal_count":  r["signal_count"],
+            # deprecated
+            "score":         r["insolvency_score"],
         })
 
     total = len(entries)
@@ -602,7 +622,7 @@ async def kreditvakt_batch_score(
                 "elevated_risk_pct":     pct(tier_counts["elevated"]),
                 "high_risk_pct":         pct(tier_counts["high"]),
                 "critical_pct":          pct(tier_counts["critical"]),
-                "weighted_avg_score":    round(score_sum / total, 1) if total else 0.0,
+                "weighted_avg_display_score": round(score_sum / total, 1) if total else 0.0,
                 "estimated_at_risk_sek": total_skuld_at_risk,
             },
             "entries": entries,
@@ -1123,13 +1143,17 @@ async def norric_company_profile(
         orgnr: Swedish organisation number
     """
     from tools.kreditvakt_engine import score_company
+    from scoring.display import to_display
     orgnr = validate_orgnr(orgnr)
     r = score_company(orgnr)
+
+    p = round(r.get("insolvency_score", 0) / 100, 4)
+    ds, _ = to_display(p)
 
     return wrap(
         tool="norric_company_profile_v1",
         source=["skatteverket", "kronofogden", "bolagsverket"],
-        confidence=round(max(0.0, 1.0 - r["insolvency_score"] / 120), 2),
+        confidence=round(max(0.0, 1.0 - p), 2),
         ttl=3_600,
         data={
             "orgnr":              r["orgnr"],
@@ -1137,6 +1161,12 @@ async def norric_company_profile(
             "industry":           r["industry"],
             "org_age_years":      r["org_age_years"],
             "registered_year":    r["registered_year"],
+            # v2.1 display fields
+            "display_score":      ds.display_score,
+            "band":               ds.band,
+            "band_label":         ds.band_label,
+            "band_action":        ds.band_action,
+            # deprecated aliases (sunset 2027-05)
             "insolvency_score":   r["insolvency_score"],
             "insolvency_verdict": r["verdict"],
             "signal_count":       r["signal_count"],
