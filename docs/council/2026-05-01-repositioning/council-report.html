@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM Council — Kreditvakt Repositioning</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,700;9..144,900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #0a0a0a;
+    --paper: #f4f1ea;
+    --paper-warm: #ede8dc;
+    --rule: #1a1a1a;
+    --accent: #8b1a1a;
+    --accent-soft: #c97a4a;
+    --green: #2d5016;
+    --muted: #5a544a;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Fraunces', Georgia, serif;
+    font-size: 17px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    background-image:
+      radial-gradient(circle at 20% 10%, rgba(139,26,26,0.04) 0%, transparent 40%),
+      radial-gradient(circle at 80% 90%, rgba(201,122,74,0.05) 0%, transparent 40%);
+    min-height: 100vh;
+  }
+  .page {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 60px 50px 80px;
+  }
+  .masthead {
+    border-top: 4px double var(--ink);
+    border-bottom: 1px solid var(--ink);
+    padding: 24px 0 18px;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 20px;
+    margin-bottom: 8px;
+  }
+  .masthead-meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .masthead-meta.right { text-align: right; }
+  .masthead h1 {
+    font-family: 'Fraunces', serif;
+    font-weight: 900;
+    font-size: 38px;
+    letter-spacing: -0.02em;
+    line-height: 0.95;
+    text-align: center;
+    font-variation-settings: "opsz" 144;
+  }
+  .strapline {
+    text-align: center;
+    font-style: italic;
+    font-size: 15px;
+    color: var(--muted);
+    padding: 14px 0 32px;
+    border-bottom: 1px solid var(--ink);
+    margin-bottom: 40px;
+  }
+  .verdict-box {
+    background: var(--ink);
+    color: var(--paper);
+    padding: 28px 32px;
+    margin: 0 0 48px;
+    position: relative;
+  }
+  .verdict-box::before {
+    content: "";
+    position: absolute;
+    inset: 4px;
+    border: 1px solid rgba(244,241,234,0.2);
+    pointer-events: none;
+  }
+  .verdict-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: var(--accent-soft);
+    margin-bottom: 10px;
+  }
+  .verdict-box h2 {
+    font-family: 'Fraunces', serif;
+    font-weight: 700;
+    font-size: 24px;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+  }
+  .verdict-box p {
+    margin-top: 14px;
+    font-size: 16px;
+    line-height: 1.6;
+    color: rgba(244,241,234,0.85);
+  }
+  .section-rule {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin: 56px 0 28px;
+  }
+  .section-rule::before, .section-rule::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--ink);
+  }
+  .section-rule span {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+  }
+  .advisor {
+    margin-bottom: 44px;
+    border: 1px solid var(--ink);
+    background: var(--paper-warm);
+    position: relative;
+  }
+  .advisor-header {
+    display: grid;
+    grid-template-columns: 60px 1fr auto;
+    align-items: center;
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--ink);
+    background: var(--ink);
+    color: var(--paper);
+    gap: 18px;
+  }
+  .advisor-num {
+    font-family: 'Fraunces', serif;
+    font-weight: 900;
+    font-size: 36px;
+    line-height: 1;
+    color: var(--accent-soft);
+    font-variation-settings: "opsz" 144;
+  }
+  .advisor-name {
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: 19px;
+    letter-spacing: -0.01em;
+  }
+  .advisor-role {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent-soft);
+    margin-top: 3px;
+  }
+  .advisor-stance {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    padding: 6px 10px;
+    border: 1px solid var(--accent-soft);
+    color: var(--accent-soft);
+  }
+  .advisor-body {
+    padding: 24px 28px;
+  }
+  .advisor-body p {
+    margin-bottom: 14px;
+  }
+  .advisor-body p:last-child { margin-bottom: 0; }
+  .verdict-line {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px dashed var(--ink);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.05em;
+  }
+  .verdict-line strong {
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    font-size: 11px;
+  }
+  .peer-review {
+    margin-top: 14px;
+    padding: 14px 18px;
+    background: var(--paper);
+    border-left: 3px solid var(--accent);
+    font-size: 15px;
+    font-style: italic;
+    color: var(--muted);
+  }
+  .peer-review-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-style: normal;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 6px;
+    display: block;
+  }
+  .chairman {
+    margin-top: 60px;
+    border: 4px double var(--ink);
+    padding: 36px 40px;
+    background: var(--paper-warm);
+    position: relative;
+  }
+  .chairman-tag {
+    position: absolute;
+    top: -14px;
+    left: 32px;
+    background: var(--paper);
+    padding: 4px 14px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    border: 1px solid var(--ink);
+  }
+  .chairman h2 {
+    font-family: 'Fraunces', serif;
+    font-weight: 900;
+    font-size: 28px;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    margin-bottom: 20px;
+    font-variation-settings: "opsz" 144;
+  }
+  .chairman p { margin-bottom: 14px; }
+  .ruling {
+    margin-top: 28px;
+    padding: 20px 24px;
+    background: var(--ink);
+    color: var(--paper);
+  }
+  .ruling-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: var(--accent-soft);
+    margin-bottom: 8px;
+  }
+  .ruling h3 {
+    font-family: 'Fraunces', serif;
+    font-weight: 700;
+    font-size: 19px;
+    line-height: 1.3;
+    margin-bottom: 10px;
+  }
+  .next-steps {
+    margin-top: 32px;
+    border-top: 1px solid var(--ink);
+    padding-top: 24px;
+  }
+  .next-steps h3 {
+    font-family: 'Fraunces', serif;
+    font-weight: 700;
+    font-size: 17px;
+    margin-bottom: 14px;
+  }
+  .next-steps ol {
+    list-style: none;
+    counter-reset: step;
+  }
+  .next-steps li {
+    counter-increment: step;
+    padding: 10px 0 10px 44px;
+    position: relative;
+    border-bottom: 1px dotted rgba(0,0,0,0.2);
+    font-size: 16px;
+  }
+  .next-steps li::before {
+    content: counter(step, decimal-leading-zero);
+    position: absolute;
+    left: 0;
+    top: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .footnote {
+    margin-top: 50px;
+    padding-top: 20px;
+    border-top: 1px solid var(--ink);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+  }
+  em { font-style: italic; }
+  strong { font-weight: 600; }
+  .pull {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 19px;
+    line-height: 1.4;
+    color: var(--accent);
+    border-left: 3px solid var(--accent);
+    padding: 4px 0 4px 18px;
+    margin: 14px 0;
+  }
+  @media (max-width: 700px) {
+    .page { padding: 30px 22px 50px; }
+    .masthead { grid-template-columns: 1fr; text-align: center; }
+    .masthead-meta.right { text-align: center; }
+    .masthead h1 { font-size: 30px; }
+    .advisor-header { grid-template-columns: 1fr; gap: 8px; }
+    .chairman { padding: 28px 24px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="masthead">
+    <div class="masthead-meta">Norric / Council Memo No. 14</div>
+    <h1>The Kreditvakt<br>Pressure Test</h1>
+    <div class="masthead-meta right">Malmö · 01 May 2026</div>
+  </header>
+  <div class="strapline">Five advisors, one chairman — on the question of scoring, pricing, and sequencing.</div>
+
+  <div class="verdict-box">
+    <div class="verdict-label">Scenario</div>
+    <h2>Investors endorsed Kreditvakt as the wedge. They want simpler scoring (0–20), six-tier pricing with a free entry, the 5 kr search killed, and Enterprise pricing taken off the website. The question is not <em>whether</em> to do this — it's <em>how</em> to do it without amputating the moat.</h2>
+    <p>Council convened to stress-test the proposed structure before code or copy is written.</p>
+  </div>
+
+  <div class="section-rule"><span>The Five Advisors</span></div>
+
+  <!-- Advisor 1 -->
+  <div class="advisor">
+    <div class="advisor-header">
+      <div class="advisor-num">01</div>
+      <div>
+        <div class="advisor-name">Lena Holmberg</div>
+        <div class="advisor-role">Credit Risk Underwriter · 22 yrs Nordea, SEB</div>
+      </div>
+      <div class="advisor-stance">Endorse with edits</div>
+    </div>
+    <div class="advisor-body">
+      <p>The 0–20 scale is correct, but only if the bands map to <em>action</em>, not feeling. "Bevaka" and "Förhöjd risk" are vague — credit committees want decision triggers. Rename them. A 13–16 score should read <em>"Stoppa nya krediter"</em> or <em>"Kräv säkerhet"</em>. That's how a real risk officer reads a report at 08:30 on a Monday.</p>
+      <p>Second concern: a five-band scale collapses too much information for portfolio buyers. Norion Bank monitoring 4,000 SME exposures needs more granularity than a retail Klarna user. Solution: show 0–20 by default, but expose the underlying 0–100 in API responses and Premium dashboards. The investor feedback was about the marketing surface, not the data model.</p>
+      <p class="pull">"A score is a verb disguised as a noun. Make sure yours points to the verb."</p>
+      <div class="verdict-line"><strong>Verdict ·</strong> Ship the 0–20 band, but rewrite the labels as decisions, not adjectives. Keep 0–100 visible in API and Guld+.</div>
+      <div class="peer-review">
+        <span class="peer-review-label">Peer review (anonymous)</span>
+        She's right about the labels — "Bevaka" is what a Bolagsverket form says, not what a credit officer needs. But pushing 0–100 visibility into Guld muddies the simplification thesis. Pick one surface or you're back to where you started.
+      </div>
+    </div>
+  </div>
+
+  <!-- Advisor 2 -->
+  <div class="advisor">
+    <div class="advisor-header">
+      <div class="advisor-num">02</div>
+      <div>
+        <div class="advisor-name">Magnus Ek</div>
+        <div class="advisor-role">SaaS Pricing Strategist · ex-Klarna, ex-Tink</div>
+      </div>
+      <div class="advisor-stance">Reject the ladder</div>
+    </div>
+    <div class="advisor-body">
+      <p>Six tiers is two tiers too many. Every B2B pricing study from the last decade says the same thing: three to four tiers maximize conversion, six tiers cause analysis paralysis and the customer defaults to the cheapest. You'll cannibalize Silver into Brons and Premium into Guld.</p>
+      <p>The Free tier is also dangerous in this category. Credit data is a "buy once you trust it" product — if Free shows enough to be useful, no one upgrades. If Free shows nothing, it's a marketing liability. The right wedge is a <em>14-day full-access trial</em>, not a Free tier. That's how credit bureaus do it. That's how UC and Bisnode do it.</p>
+      <p>On the 5 kr kill — agreed, but for a different reason than the founder said. 5 kr per search isn't a "hobby tool" signal; it's a <em>willingness-to-pay anchor</em> that destroys all higher prices once it exists. Once a buyer sees 5 kr, 499 kr feels like a 100x markup, not a different product.</p>
+      <p class="pull">"Six tiers is what founders build when they can't decide who their customer is."</p>
+      <div class="verdict-line"><strong>Verdict ·</strong> Compress to four tiers: Trial (14d), Silver (499), Guld (1,499), Enterprise. Drop Brons. Drop Premium as a separate tier — fold into Guld. Drop perpetual Free.</div>
+      <div class="peer-review">
+        <span class="peer-review-label">Peer review (anonymous)</span>
+        He's mostly right but overcorrecting. Free <em>does</em> work for credit products if it's lookup-capped and band-only — that's the Creditsafe model and it converts. The real risk isn't tier count, it's tier <em>differentiation</em>. If you can articulate why each tier exists in one sentence, six is fine.
+      </div>
+    </div>
+  </div>
+
+  <!-- Advisor 3 -->
+  <div class="advisor">
+    <div class="advisor-header">
+      <div class="advisor-num">03</div>
+      <div>
+        <div class="advisor-name">Astrid Vinter</div>
+        <div class="advisor-role">GTM Operator · scaled 3 Nordic B2B SaaS to €10M ARR</div>
+      </div>
+      <div class="advisor-stance">Endorse, with sequencing concerns</div>
+    </div>
+    <div class="advisor-body">
+      <p>The repositioning is right; the timing is the question. The investor said "use Kreditvakt to launch the rest" — but Kreditvakt has zero paying customers right now. You're being asked to build the product architecture for a portfolio that hasn't been validated by a single contract.</p>
+      <p>Norion and Serafim outreach is sent but not closed. The right move is to <em>close one paid pilot first</em> — even at a discounted 50,000 SEK annual — and let that customer dictate the pricing tiers. The investor feedback is hypothesis, not data. A signed Norion contract would tell you whether 1,499 kr/month is right or if Guld should be 9,999 kr/month for portfolio monitoring.</p>
+      <p>Holding the granular debt breakdown behind funding is fine, but make sure the demo to Norion next week shows it as a working feature, not a roadmap promise. Investors funded a vision; buyers fund a product.</p>
+      <div class="verdict-line"><strong>Verdict ·</strong> Don't ship six tiers publicly until one paid pilot validates the band structure. Ship a private price sheet now, public pricing page after first close.</div>
+      <div class="peer-review">
+        <span class="peer-review-label">Peer review (anonymous)</span>
+        Strong point on letting the first contract set the price. But "wait for validation" is also how products die in the market. The pricing page is also a sales tool — it sets the anchor when you're <em>negotiating</em> with Norion. Publishing it is part of the close, not a consequence of it.
+      </div>
+    </div>
+  </div>
+
+  <!-- Advisor 4 -->
+  <div class="advisor">
+    <div class="advisor-header">
+      <div class="advisor-num">04</div>
+      <div>
+        <div class="advisor-name">Yuki Tanaka</div>
+        <div class="advisor-role">Product Architect · ex-Stripe, ex-Plaid</div>
+      </div>
+      <div class="advisor-stance">Concerns on score model</div>
+    </div>
+    <div class="advisor-body">
+      <p>Translating 0–100 to 0–20 sounds like UX simplification but is actually statistical lossy compression. You're collapsing 5 internal points into 1 displayed point. That's fine for marketing — but you must be careful about three things.</p>
+      <p>One: <em>boundary effects</em>. A company at internal score 80 (display 16) and one at internal 81 (display 17) jump bands on a one-point change. Customers will see this as instability. Fix: hysteresis — require a 3-point internal change before band moves up or down.</p>
+      <p>Two: <em>regulatory exposure</em>. If Kreditvakt ends up in MiFID II / consumer credit decisioning territory, displaying simplified bands while making decisions on hidden 0–100 is a <em>black-box AI</em> red flag under the EU AI Act. Compliance tier (norric_explain_score_v1) becomes mandatory, not optional. Worth pricing accordingly.</p>
+      <p>Three: the granular debt breakdown is the moat, but it's also the GDPR landmine. Listing "unpaid bills" by creditor name pulls in personal data exposure if any creditor is a sole proprietor (enskild firma). Architecturally — strip personal-data fields from the line-item view, show only legal entity creditors in Silver, and put full creditor identity behind Guld with a click-through DPA.</p>
+      <p class="pull">"The score is the marketing. The breakdown is the product. The DPA is the moat."</p>
+      <div class="verdict-line"><strong>Verdict ·</strong> Endorse 0–20 with hysteresis. Reposition norric_explain_score_v1 from "Compliance tier upsell" to "regulatory hedge." Architect debt breakdown around enskild firma exclusion.</div>
+      <div class="peer-review">
+        <span class="peer-review-label">Peer review (anonymous)</span>
+        The hysteresis point is excellent and most founders miss it. The EU AI Act framing might be premature — Kreditvakt is B2B credit signal, not consumer-facing decisioning, so Annex III high-risk classification isn't automatic. But preparing for it costs nothing and future-proofs against regulatory drift.
+      </div>
+    </div>
+  </div>
+
+  <!-- Advisor 5 -->
+  <div class="advisor">
+    <div class="advisor-header">
+      <div class="advisor-num">05</div>
+      <div>
+        <div class="advisor-name">Henrik Sjögren</div>
+        <div class="advisor-role">Indie Founder · 3 exits, all bootstrapped</div>
+    </div>
+      <div class="advisor-stance">Reject the framing</div>
+    </div>
+    <div class="advisor-body">
+      <p>The investors gave good feedback on a product they don't sell. The 0–20 scoring change is right. The 5 kr removal is right. But "use Kreditvakt to launch the rest" is investor-vocabulary for <em>reduce surface area</em>, and that's the most important thing in this memo.</p>
+      <p>You have eight active products, one founder, and one closed contract pending. The pricing tier question is a distraction. The real question the investors are asking — politely — is: <em>which products do you stop building?</em></p>
+      <p>If Kreditvakt is the wedge, then SIGNAL, Vigil, Sigvik, SiteLoop, Skolradar, and Jarvis are not getting your attention this quarter. That's not a pricing decision; it's a roadmap decision. Make it explicit. Tell the investors: "Q2 is Kreditvakt close, Kreditvakt onboarding, Kreditvakt pricing iteration. Everything else is on maintenance until Q3."</p>
+      <p>On the pricing tiers themselves: ship whatever you want. The first three customers will tell you what's wrong with it within 90 days, and you'll change it anyway. Don't optimize the page; optimize the close.</p>
+      <p class="pull">"Pricing pages don't sell products. Pipelines do."</p>
+      <div class="verdict-line"><strong>Verdict ·</strong> Pricing decisions are second-order. The first-order decision is which 6 of your 8 products go on ice. Make that explicit before drafting any tier copy.</div>
+      <div class="peer-review">
+        <span class="peer-review-label">Peer review (anonymous)</span>
+        The roadmap point is the most important thing in this entire memo and everyone else is dancing around it. But he's wrong that pricing is second-order — for a B2B credit product, the price <em>is</em> the positioning. The 5 kr line communicated "toy"; 1,499 kr communicates "infrastructure." Get it right once, then close.
+      </div>
+    </div>
+  </div>
+
+  <!-- Chairman -->
+  <div class="chairman">
+    <div class="chairman-tag">Chairman's Synthesis</div>
+    <h2>The investors are right about the surface. The council is right about the substance. Both can ship.</h2>
+
+    <p>The five advisors converge on three points and split on two. The convergence first.</p>
+
+    <p><strong>One — kill the 5 kr search.</strong> Unanimous. It's a willingness-to-pay anchor that contaminates everything above it. Magnus is correct that this is the strategically critical change in the entire memo, more than tier count.</p>
+
+    <p><strong>Two — the 0–20 scale ships, but with two non-negotiable refinements.</strong> Lena's point on action-labels (replace "Bevaka" with decision verbs) and Yuki's point on hysteresis (3-point internal swing required before band changes) are both correct and additive. Neither costs engineering time meaningfully. Ship both.</p>
+
+    <p><strong>Three — granular debt breakdown is the moat, not the score.</strong> The score sells the demo; the breakdown sells the renewal. Yuki's enskild firma carve-out is a real architectural requirement, not paranoia. Build it in from day one.</p>
+
+    <p>Now the splits.</p>
+
+    <p><strong>Four — tier count.</strong> Magnus says four. Founder proposed six. The synthesis: <em>five</em>. Drop Brons (Magnus is right that 299 kr cannibalizes 499 kr without adding a real customer segment). Keep Free as <em>lookup-capped band-only</em>, not full trial — this is the Creditsafe model and it converts. Keep Silver, Guld, Premium, Enterprise. The Premium tier earns its existence specifically because Yuki's regulatory hedge (norric_explain_score_v1) lives there for compliance buyers willing to pay 3-4x for explainability.</p>
+
+    <p><strong>Five — sequencing.</strong> Astrid wants pilot-first; Henrik wants roadmap-first. Both are right at different time horizons. The pricing page ships <em>now</em> as a sales tool for the Norion close, not as a public commitment. The roadmap decision (which 6 of 8 products go on ice) ships <em>this week</em>, internally, with a written one-pager you send to the investors as a follow-up to the meeting.</p>
+
+    <div class="ruling">
+      <div class="ruling-label">Ruling</div>
+      <h3>Ship the repositioning. Five tiers, not six. Action-labels on the score bands. Hysteresis in the model. Granular debt as the Guld+ moat. Pricing page is published as a sales tool, not a public commitment, until first paid contract closes.</h3>
+    </div>
+
+    <div class="next-steps">
+      <h3>Concrete next steps, in order</h3>
+      <ol>
+        <li>Write a one-page roadmap memo to investors this week: <em>"Q2 = Kreditvakt close-and-onboard. Sigvik on maintenance. Everything else on ice."</em> This is the most important deliverable in the memo.</li>
+        <li>Draft the pricing page with five tiers (Free / Silver 499 / Guld 1,499 / Premium 4,999 / Enterprise negotiated). Free is lookup-capped, band-only.</li>
+        <li>Refactor score display to 0–20 with action-verb Swedish labels. Implement 3-point hysteresis in the band-transition logic. Keep 0–100 in API responses.</li>
+        <li>Architect debt-breakdown view with enskild firma carve-out before launch. Personal-data fields stripped from Silver; full creditor identity behind Guld + DPA click-through.</li>
+        <li>Use the new pricing page as the anchor in the Norion / Serafim close conversations next week. Let the first paid contract validate or kill the band structure.</li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="footnote">
+    <span>End of Council Memo No. 14</span>
+    <span>Norric AB · Confidential</span>
+  </div>
+
+</div>
+</body>
+</html>

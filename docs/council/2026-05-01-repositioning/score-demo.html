@@ -1,0 +1,921 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kreditvakt · Score Engine v2</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #0d0d0d;
+    --paper: #faf8f3;
+    --paper-cool: #f0ede5;
+    --accent: #6b1d1d;
+    --accent-warm: #b8703a;
+    --green: #2d5016;
+    --amber: #b8702e;
+    --red: #8b1a1a;
+    --critical: #5a0e0e;
+    --muted: #6a6356;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Cormorant Garamond', Georgia, serif;
+    font-size: 16px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+  body {
+    background:
+      radial-gradient(circle at 15% 15%, rgba(107,29,29,0.04) 0%, transparent 40%),
+      radial-gradient(circle at 85% 85%, rgba(184,112,58,0.04) 0%, transparent 40%),
+      var(--paper);
+  }
+  .app {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 30px 40px 60px;
+  }
+
+  /* Header */
+  .app-header {
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 18px;
+    margin-bottom: 32px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: end;
+    gap: 30px;
+  }
+  .brand-block {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+  }
+  .brand {
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 600;
+    font-size: 34px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    line-height: 1;
+  }
+  .brand-divider {
+    width: 1px;
+    height: 24px;
+    background: var(--ink);
+  }
+  .brand-product {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .header-meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-align: right;
+    line-height: 1.6;
+  }
+  .live-dot {
+    display: inline-block;
+    width: 7px; height: 7px;
+    background: var(--green);
+    border-radius: 50%;
+    margin-right: 6px;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  /* Title */
+  .demo-title {
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 500;
+    font-size: 38px;
+    letter-spacing: -0.015em;
+    line-height: 1.05;
+    margin-bottom: 8px;
+  }
+  .demo-title em { font-style: italic; color: var(--accent); }
+  .demo-strap {
+    font-style: italic;
+    font-size: 17px;
+    color: var(--muted);
+    margin-bottom: 36px;
+    max-width: 680px;
+  }
+
+  /* Main grid */
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 28px;
+  }
+
+  /* Score panel */
+  .score-panel {
+    background: var(--paper-cool);
+    border: 1px solid var(--ink);
+    padding: 32px;
+    position: relative;
+  }
+  .panel-eyebrow {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .panel-eyebrow-num {
+    font-weight: 600;
+  }
+  .company-name {
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 600;
+    font-size: 28px;
+    margin-bottom: 4px;
+  }
+  .company-meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.05em;
+    margin-bottom: 28px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid rgba(13,13,13,0.15);
+  }
+
+  /* Big score display */
+  .score-main {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 30px;
+    align-items: center;
+    margin-bottom: 28px;
+  }
+  .score-circle {
+    width: 160px;
+    height: 160px;
+    border-radius: 50%;
+    border: 2px solid var(--ink);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    background: var(--paper);
+    transition: all 0.6s ease;
+  }
+  .score-circle.band-1 { border-color: var(--green); background: rgba(45,80,22,0.06); }
+  .score-circle.band-2 { border-color: var(--amber); background: rgba(184,112,46,0.06); }
+  .score-circle.band-3 { border-color: var(--accent-warm); background: rgba(184,112,58,0.08); }
+  .score-circle.band-4 { border-color: var(--accent); background: rgba(107,29,29,0.08); }
+  .score-circle.band-5 { border-color: var(--critical); background: rgba(90,14,14,0.1); }
+
+  .score-value {
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 500;
+    font-size: 78px;
+    line-height: 0.85;
+    letter-spacing: -0.04em;
+    transition: color 0.4s ease;
+  }
+  .score-circle.band-1 .score-value { color: var(--green); }
+  .score-circle.band-2 .score-value { color: var(--amber); }
+  .score-circle.band-3 .score-value { color: var(--accent-warm); }
+  .score-circle.band-4 .score-value { color: var(--accent); }
+  .score-circle.band-5 .score-value { color: var(--critical); }
+
+  .score-of {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-top: 4px;
+  }
+  .score-info {
+    flex-grow: 1;
+  }
+  .score-band-label {
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 600;
+    font-style: italic;
+    font-size: 32px;
+    line-height: 1.1;
+    letter-spacing: -0.01em;
+    margin-bottom: 6px;
+    transition: color 0.4s ease;
+  }
+  .band-1 .score-band-label { color: var(--green); }
+  .band-2 .score-band-label { color: var(--amber); }
+  .band-3 .score-band-label { color: var(--accent-warm); }
+  .band-4 .score-band-label { color: var(--accent); }
+  .band-5 .score-band-label { color: var(--critical); }
+  .score-action {
+    font-size: 16px;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+
+  /* Band visualization */
+  .bands {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 4px;
+    margin-bottom: 14px;
+    margin-top: 24px;
+  }
+  .band-bar {
+    height: 38px;
+    border: 1px solid var(--ink);
+    background: var(--paper);
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.4s ease;
+    overflow: hidden;
+  }
+  .band-bar.active {
+    background: var(--ink);
+    color: var(--paper);
+  }
+  .band-bar.active.b1 { background: var(--green); border-color: var(--green); }
+  .band-bar.active.b2 { background: var(--amber); border-color: var(--amber); }
+  .band-bar.active.b3 { background: var(--accent-warm); border-color: var(--accent-warm); }
+  .band-bar.active.b4 { background: var(--accent); border-color: var(--accent); }
+  .band-bar.active.b5 { background: var(--critical); border-color: var(--critical); }
+  .band-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    font-weight: 600;
+  }
+  .band-labels {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 4px;
+    margin-bottom: 28px;
+  }
+  .band-label-text {
+    text-align: center;
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 500;
+    font-style: italic;
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.2;
+    padding: 0 2px;
+  }
+  .band-label-text.active {
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  /* Internal score reveal */
+  .internal-score {
+    background: var(--ink);
+    color: var(--paper);
+    padding: 16px 20px;
+    margin-top: 20px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 20px;
+    align-items: center;
+  }
+  .internal-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--accent-warm);
+    margin-bottom: 4px;
+  }
+  .internal-value {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 22px;
+    font-weight: 500;
+  }
+  .internal-detail {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: rgba(250,248,243,0.6);
+    line-height: 1.5;
+    text-align: right;
+  }
+
+  /* Right column: controls + flags */
+  .side-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .panel-card {
+    background: var(--paper-cool);
+    border: 1px solid var(--ink);
+    padding: 24px;
+  }
+  .panel-card h3 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 16px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--ink);
+  }
+
+  /* Controls */
+  .control-row {
+    margin-bottom: 18px;
+  }
+  .control-row:last-child { margin-bottom: 0; }
+  .control-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .control-label-val {
+    font-weight: 600;
+    color: var(--accent);
+  }
+  input[type="range"] {
+    width: 100%;
+    height: 4px;
+    background: var(--ink);
+    border-radius: 0;
+    outline: none;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    background: var(--accent);
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid var(--paper);
+    box-shadow: 0 0 0 1px var(--ink);
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    background: var(--accent);
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid var(--paper);
+    box-shadow: 0 0 0 1px var(--ink);
+  }
+  .toggle-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .toggle-btn {
+    padding: 8px 12px;
+    background: var(--paper);
+    border: 1px solid var(--ink);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .toggle-btn:hover { background: var(--paper-cool); }
+  .toggle-btn.active {
+    background: var(--ink);
+    color: var(--paper);
+  }
+
+  /* Flags */
+  .flags-list {
+    list-style: none;
+  }
+  .flag-item {
+    padding: 12px 0;
+    border-bottom: 1px dotted rgba(13,13,13,0.2);
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 12px;
+    align-items: center;
+    font-size: 14px;
+  }
+  .flag-item:last-child { border-bottom: none; }
+  .flag-icon {
+    width: 24px; height: 24px;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .flag-text strong {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 2px;
+  }
+  .flag-text-meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.05em;
+  }
+  .flag-amount {
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 600;
+    color: var(--accent);
+    font-size: 16px;
+    text-align: right;
+  }
+  .flag-locked {
+    opacity: 0.4;
+    filter: blur(3px);
+    user-select: none;
+  }
+  .upgrade-prompt {
+    margin-top: 16px;
+    padding: 14px 16px;
+    background: var(--ink);
+    color: var(--paper);
+    text-align: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+
+  /* Hysteresis log */
+  .log-panel {
+    grid-column: 1 / -1;
+    background: var(--ink);
+    color: var(--paper);
+    padding: 26px 32px;
+    border: 1px solid var(--ink);
+    margin-top: 28px;
+  }
+  .log-panel h3 {
+    color: var(--accent-warm);
+    margin-bottom: 16px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(250,248,243,0.2);
+  }
+  .log-entries {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    line-height: 1.8;
+    max-height: 180px;
+    overflow-y: auto;
+  }
+  .log-entry {
+    padding: 4px 0;
+    display: grid;
+    grid-template-columns: 80px 100px 1fr;
+    gap: 16px;
+    border-bottom: 1px solid rgba(250,248,243,0.08);
+  }
+  .log-time { color: rgba(250,248,243,0.5); }
+  .log-tag {
+    font-weight: 600;
+    letter-spacing: 0.1em;
+  }
+  .log-tag.move { color: var(--accent-warm); }
+  .log-tag.hold { color: rgba(250,248,243,0.5); }
+  .log-tag.init { color: rgba(250,248,243,0.7); }
+
+  /* Footer attribution */
+  .demo-footer {
+    margin-top: 40px;
+    padding-top: 20px;
+    border-top: 1px solid var(--ink);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+  }
+
+  @media (max-width: 880px) {
+    .app { padding: 20px 20px 40px; }
+    .app-header { grid-template-columns: 1fr; gap: 16px; }
+    .header-meta { text-align: left; }
+    .demo-title { font-size: 28px; }
+    .main-grid { grid-template-columns: 1fr; gap: 20px; }
+    .score-main { grid-template-columns: 1fr; gap: 20px; text-align: center; }
+    .score-circle { margin: 0 auto; }
+    .band-label-text { font-size: 10px; }
+    .log-entry { grid-template-columns: 1fr; gap: 4px; }
+    .demo-footer { flex-direction: column; gap: 6px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <header class="app-header">
+    <div class="brand-block">
+      <div class="brand">Kreditvakt</div>
+      <div class="brand-divider"></div>
+      <div class="brand-product">Score Engine v2 · Demo</div>
+    </div>
+    <div class="header-meta">
+      <span><span class="live-dot"></span>Live · 0–20 band system</span><br>
+      Hysteresis: 3pt internal · 5 band ladder
+    </div>
+  </header>
+
+  <h1 class="demo-title">Score Refactor: <em>20 punkter, fem beslut.</em></h1>
+  <p class="demo-strap">Den interna modellen arbetar i 0–100. Den visade poängen är konsoliderad till 0–20 i fem band, märkta som beslut. Ändra det interna värdet och se hur bandet rör sig — eller inte rör sig — på grund av hysteresen.</p>
+
+  <div class="main-grid">
+
+    <!-- Score Panel -->
+    <div class="score-panel">
+      <div class="panel-eyebrow">
+        <span>Riskpoäng</span>
+        <span class="panel-eyebrow-num">REC-2026-04-29</span>
+      </div>
+      <div class="company-name" id="company-name">Exempel Bygg AB</div>
+      <div class="company-meta">556789-1234 · Aktiebolag · Byggnadsentreprenörer · Malmö</div>
+
+      <div class="score-main">
+        <div class="score-circle band-4" id="score-circle">
+          <div class="score-value" id="score-display">14</div>
+          <div class="score-of">/ 20</div>
+        </div>
+        <div class="score-info" id="score-info">
+          <div class="score-band-label" id="band-label">Kräv säkerhet</div>
+          <div class="score-action" id="band-action">Fortsätt befintliga relationer endast med personlig borgen eller fakturapant. Stoppa nya kreditlinjer.</div>
+        </div>
+      </div>
+
+      <div class="bands" id="bands">
+        <div class="band-bar b1" data-band="1"><span class="band-num">0–4</span></div>
+        <div class="band-bar b2" data-band="2"><span class="band-num">5–8</span></div>
+        <div class="band-bar b3" data-band="3"><span class="band-num">9–12</span></div>
+        <div class="band-bar b4 active" data-band="4"><span class="band-num">13–16</span></div>
+        <div class="band-bar b5" data-band="5"><span class="band-num">17–20</span></div>
+      </div>
+      <div class="band-labels" id="band-labels">
+        <div class="band-label-text" data-band="1">Stabil</div>
+        <div class="band-label-text" data-band="2">Bevaka</div>
+        <div class="band-label-text" data-band="3">Förhöjd risk</div>
+        <div class="band-label-text active" data-band="4">Kräv säkerhet</div>
+        <div class="band-label-text" data-band="5">Stoppa krediter</div>
+      </div>
+
+      <div class="internal-score">
+        <div>
+          <div class="internal-label">Internal Score (API only)</div>
+          <div class="internal-value"><span id="internal-display">68</span> / 100</div>
+        </div>
+        <div class="internal-detail">
+          Last band move: <span id="last-move">—</span><br>
+          Hysteresis lock: <span id="hysteresis-status">unlocked</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Side Panel -->
+    <div class="side-panel">
+
+      <div class="panel-card">
+        <h3>Modellkontroller (Demo)</h3>
+        <div class="control-row">
+          <div class="control-label">
+            <span>Internal Score (0–100)</span>
+            <span class="control-label-val"><span id="slider-display">68</span></span>
+          </div>
+          <input type="range" id="score-slider" min="0" max="100" value="68">
+        </div>
+        <div class="control-row">
+          <div class="control-label">
+            <span>Hystereströskel</span>
+            <span class="control-label-val"><span id="hyst-display">3</span> pt</span>
+          </div>
+          <div class="toggle-row">
+            <button class="toggle-btn" data-hyst="0">0 pt</button>
+            <button class="toggle-btn active" data-hyst="3">3 pt</button>
+            <button class="toggle-btn" data-hyst="5">5 pt</button>
+          </div>
+        </div>
+        <div class="control-row">
+          <div class="control-label">
+            <span>Användarnivå</span>
+            <span class="control-label-val" id="tier-display">Guld</span>
+          </div>
+          <div class="toggle-row">
+            <button class="toggle-btn" data-tier="free">Fri</button>
+            <button class="toggle-btn" data-tier="silver">Silver</button>
+            <button class="toggle-btn active" data-tier="guld">Guld</button>
+            <button class="toggle-btn" data-tier="premium">Premium</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-card">
+        <h3>Aktiva varningssignaler</h3>
+        <ul class="flags-list" id="flags-list">
+          <!-- populated by JS -->
+        </ul>
+        <div class="upgrade-prompt" id="upgrade-prompt" style="display:none;">
+          Uppgradera för fullständiga detaljer →
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Hysteresis Log -->
+    <div class="log-panel">
+      <h3>Band Transition Log · Hysteresis Active</h3>
+      <div class="log-entries" id="log-entries">
+        <div class="log-entry">
+          <span class="log-time">12:00:00</span>
+          <span class="log-tag init">INIT</span>
+          <span>Internal score 68 · Display 14 · Band 4 (Kräv säkerhet)</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="demo-footer">
+    <span>Norric · Kreditvakt · Internal Demo · Confidential</span>
+    <span>Score Engine v2.0 · 2026-05-01</span>
+  </div>
+
+</div>
+
+<script>
+  // Band definitions: [internal_min, internal_max, band_num, display_min, display_max, label, action]
+  const BANDS = [
+    { num: 1, internalMin: 0,  internalMax: 20,  displayMin: 0,  displayMax: 4,  label: "Stabil",          action: "Inga åtgärder krävs. Företaget bedöms ha låg risk för betalningssvårigheter inom kommande 12 månader." },
+    { num: 2, internalMin: 21, internalMax: 40,  displayMin: 5,  displayMax: 8,  label: "Bevaka",          action: "Inga omedelbara åtgärder, men signaler bör monitoreras kvartalsvis. Förstärk inte krediten utan ny utvärdering." },
+    { num: 3, internalMin: 41, internalMax: 60,  displayMin: 9,  displayMax: 12, label: "Förhöjd risk",    action: "Begränsa nya kreditlinjer. Begär uppdaterade ekonomiska underlag innan förlängning eller utökning." },
+    { num: 4, internalMin: 61, internalMax: 80,  displayMin: 13, displayMax: 16, label: "Kräv säkerhet",   action: "Fortsätt befintliga relationer endast med personlig borgen eller fakturapant. Stoppa nya kreditlinjer." },
+    { num: 5, internalMin: 81, internalMax: 100, displayMin: 17, displayMax: 20, label: "Stoppa krediter", action: "Akut åtgärd: stoppa alla utgående krediter. Påbörja indrivning av befintliga fordringar. Konkurs sannolik inom 90 dagar." }
+  ];
+
+  // Mock flags data
+  const ALL_FLAGS = [
+    { code: "RST", title: "Skattskuld hos Skatteverket", meta: "Restanslängd · 3 mån", amount: "247 800 kr", visibleFrom: "silver" },
+    { code: "KFM", title: "Betalningsföreläggande Kronofogden", meta: "Aktivt ärende · 47 dgr", amount: "89 400 kr", visibleFrom: "silver" },
+    { code: "BLV", title: "Konkursansökan Bolagsverket", meta: "Inlämnad mot dotterbolag", amount: "—", visibleFrom: "silver" },
+    { code: "F-S", title: "F-skatt återkallad", meta: "2026-03-14", amount: "—", visibleFrom: "free" }
+  ];
+
+  // State
+  let state = {
+    internalScore: 68,
+    hysteresis: 3,
+    currentBand: 4,
+    tier: "guld",
+    lastBandMoveTime: null
+  };
+
+  // Helpers
+  function getBand(internalScore) {
+    return BANDS.find(b => internalScore >= b.internalMin && internalScore <= b.internalMax);
+  }
+  function getNaturalBand(internalScore) {
+    return getBand(internalScore).num;
+  }
+  function getDisplayScore(internalScore, currentBand) {
+    // Clamp display score to current band's range
+    const band = BANDS[currentBand - 1];
+    const internalRange = band.internalMax - band.internalMin;
+    const displayRange = band.displayMax - band.displayMin;
+    const proportion = Math.max(0, Math.min(1, (internalScore - band.internalMin) / internalRange));
+    return Math.round(band.displayMin + proportion * displayRange);
+  }
+  function timestamp() {
+    const d = new Date();
+    return d.toTimeString().slice(0,8);
+  }
+
+  // Hysteresis check
+  function checkBandTransition(newInternalScore) {
+    const naturalBand = getNaturalBand(newInternalScore);
+    if (naturalBand === state.currentBand) {
+      return { changed: false, reason: "natural-stable" };
+    }
+    const currentBandDef = BANDS[state.currentBand - 1];
+    const requiredOvershoot = state.hysteresis;
+    let canMove = false;
+    let reason = "";
+    if (naturalBand > state.currentBand) {
+      // Moving up: must exceed current band's max by hysteresis amount
+      const threshold = currentBandDef.internalMax + requiredOvershoot;
+      canMove = newInternalScore >= threshold;
+      reason = canMove
+        ? `Crossed up-threshold (${threshold})`
+        : `Held — needs ≥${threshold}, got ${newInternalScore}`;
+    } else {
+      // Moving down: must fall below current band's min by hysteresis amount
+      const threshold = currentBandDef.internalMin - requiredOvershoot;
+      canMove = newInternalScore <= threshold;
+      reason = canMove
+        ? `Crossed down-threshold (${threshold})`
+        : `Held — needs ≤${threshold}, got ${newInternalScore}`;
+    }
+    return {
+      changed: canMove,
+      newBand: canMove ? naturalBand : state.currentBand,
+      reason: reason
+    };
+  }
+
+  // Render
+  function render() {
+    const band = BANDS[state.currentBand - 1];
+    const displayScore = getDisplayScore(state.internalScore, state.currentBand);
+
+    // Score circle
+    const circle = document.getElementById("score-circle");
+    circle.className = `score-circle band-${state.currentBand}`;
+    document.getElementById("score-display").textContent = displayScore;
+
+    // Band label
+    document.getElementById("band-label").textContent = band.label;
+    document.getElementById("band-action").textContent = band.action;
+    const scoreInfo = document.getElementById("score-info");
+    scoreInfo.parentElement.parentElement.querySelector(".score-info").className = `score-info band-${state.currentBand}`;
+    document.querySelector(".score-info").className = `score-info band-${state.currentBand}`;
+    document.querySelector(".score-band-label").parentElement.parentElement.className = `score-info band-${state.currentBand}`;
+
+    // Re-set band class on score-band-label parent for color
+    const scoreInfoEl = document.querySelector(".score-info");
+    scoreInfoEl.className = "score-info";
+    scoreInfoEl.classList.add(`band-${state.currentBand}`);
+
+    // Bands strip
+    document.querySelectorAll(".band-bar").forEach(el => {
+      const b = parseInt(el.dataset.band);
+      el.classList.toggle("active", b === state.currentBand);
+    });
+    document.querySelectorAll(".band-label-text").forEach(el => {
+      const b = parseInt(el.dataset.band);
+      el.classList.toggle("active", b === state.currentBand);
+    });
+
+    // Internal display
+    document.getElementById("internal-display").textContent = state.internalScore;
+    document.getElementById("slider-display").textContent = state.internalScore;
+    document.getElementById("hyst-display").textContent = state.hysteresis;
+
+    // Hysteresis status
+    const naturalBand = getNaturalBand(state.internalScore);
+    const hysteresisLocked = (naturalBand !== state.currentBand);
+    document.getElementById("hysteresis-status").textContent = hysteresisLocked
+      ? `LOCKED (natural=${naturalBand}, held=${state.currentBand})`
+      : "unlocked";
+
+    // Last move
+    document.getElementById("last-move").textContent = state.lastBandMoveTime || "—";
+
+    // Flags based on tier
+    renderFlags();
+  }
+
+  function renderFlags() {
+    const tierLevels = { free: 0, silver: 1, guld: 2, premium: 3 };
+    const userLevel = tierLevels[state.tier];
+    const list = document.getElementById("flags-list");
+    list.innerHTML = "";
+
+    if (state.tier === "free") {
+      // Free shows count only
+      const li = document.createElement("li");
+      li.className = "flag-item";
+      li.innerHTML = `
+        <div class="flag-icon">!</div>
+        <div class="flag-text">
+          <strong>3 aktiva varningar upptäckta</strong>
+          <span class="flag-text-meta">Detaljerad information kräver Silver-nivå</span>
+        </div>
+        <div class="flag-amount">···</div>
+      `;
+      list.appendChild(li);
+      document.getElementById("upgrade-prompt").style.display = "block";
+      document.getElementById("upgrade-prompt").textContent = "Uppgradera till Silver för detaljer →";
+      return;
+    }
+
+    ALL_FLAGS.forEach(flag => {
+      const flagLevel = tierLevels[flag.visibleFrom];
+      const visible = userLevel >= flagLevel;
+      const li = document.createElement("li");
+      li.className = "flag-item";
+      const showCreditor = state.tier === "guld" || state.tier === "premium";
+      const titleText = showCreditor ? flag.title : flag.title.replace(" hos Skatteverket", "").replace(" Kronofogden", "").replace(" Bolagsverket", "");
+      li.innerHTML = `
+        <div class="flag-icon">${flag.code.charAt(0)}</div>
+        <div class="flag-text">
+          <strong>${titleText}</strong>
+          <span class="flag-text-meta">${flag.meta}</span>
+        </div>
+        <div class="flag-amount">${flag.amount}</div>
+      `;
+      list.appendChild(li);
+    });
+
+    // Silver hides creditor identity prompt
+    if (state.tier === "silver") {
+      document.getElementById("upgrade-prompt").style.display = "block";
+      document.getElementById("upgrade-prompt").textContent = "Uppgradera till Guld för fordringsägaridentitet →";
+    } else {
+      document.getElementById("upgrade-prompt").style.display = "none";
+    }
+  }
+
+  function addLog(tag, text) {
+    const log = document.getElementById("log-entries");
+    const entry = document.createElement("div");
+    entry.className = "log-entry";
+    entry.innerHTML = `
+      <span class="log-time">${timestamp()}</span>
+      <span class="log-tag ${tag.toLowerCase()}">${tag}</span>
+      <span>${text}</span>
+    `;
+    log.insertBefore(entry, log.firstChild);
+    // Keep max 12 entries
+    while (log.children.length > 12) log.removeChild(log.lastChild);
+  }
+
+  // Event handlers
+  document.getElementById("score-slider").addEventListener("input", (e) => {
+    const newScore = parseInt(e.target.value);
+    const oldInternal = state.internalScore;
+    state.internalScore = newScore;
+
+    const transition = checkBandTransition(newScore);
+    if (transition.changed) {
+      const oldBand = state.currentBand;
+      state.currentBand = transition.newBand;
+      state.lastBandMoveTime = timestamp();
+      addLog("MOVE", `Internal ${oldInternal}→${newScore} · Band ${oldBand}→${transition.newBand} (${BANDS[transition.newBand-1].label}) · ${transition.reason}`);
+    } else if (getNaturalBand(newScore) !== state.currentBand) {
+      // Only log "hold" occasionally to avoid spam
+      if (Math.abs(newScore - oldInternal) >= 2) {
+        addLog("HOLD", `Internal ${newScore} · Natural=Band ${getNaturalBand(newScore)} · Display held at Band ${state.currentBand} · ${transition.reason}`);
+      }
+    }
+    render();
+  });
+
+  document.querySelectorAll("[data-hyst]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("[data-hyst]").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      state.hysteresis = parseInt(btn.dataset.hyst);
+      addLog("HOLD", `Hysteresis set to ${state.hysteresis}pt`);
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-tier]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("[data-tier]").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      state.tier = btn.dataset.tier;
+      const tierNames = { free: "Fri", silver: "Silver", guld: "Guld", premium: "Premium" };
+      document.getElementById("tier-display").textContent = tierNames[state.tier];
+      render();
+    });
+  });
+
+  // Initial render
+  render();
+</script>
+
+</body>
+</html>

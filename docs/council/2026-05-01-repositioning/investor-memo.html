@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Norric · Q2 Memo · Kreditvakt as Distribution</title>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #1a1a1a;
+    --paper: #faf8f3;
+    --rule: #1a1a1a;
+    --accent: #6b1d1d;
+    --muted: #6a6356;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'EB Garamond', Georgia, serif;
+    font-size: 18px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 70px 60px 80px;
+    background: var(--paper);
+    position: relative;
+  }
+  .page::before {
+    content: "";
+    position: absolute;
+    top: 30px; bottom: 30px; left: 30px; right: 30px;
+    border: 1px solid rgba(26,26,26,0.08);
+    pointer-events: none;
+  }
+  .letterhead {
+    text-align: center;
+    padding-bottom: 24px;
+    margin-bottom: 36px;
+    border-bottom: 2px solid var(--ink);
+    position: relative;
+  }
+  .letterhead::after {
+    content: "";
+    position: absolute;
+    bottom: -5px; left: 50%;
+    transform: translateX(-50%);
+    width: 60px;
+    height: 2px;
+    background: var(--accent);
+  }
+  .brand {
+    font-family: 'EB Garamond', serif;
+    font-weight: 700;
+    font-size: 24px;
+    letter-spacing: 0.4em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .brand-sub {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .meta {
+    display: flex;
+    justify-content: space-between;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 32px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid rgba(26,26,26,0.15);
+  }
+  .meta-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .meta-label { color: var(--accent); }
+  h1.subject {
+    font-family: 'EB Garamond', serif;
+    font-weight: 600;
+    font-style: italic;
+    font-size: 28px;
+    line-height: 1.25;
+    letter-spacing: -0.005em;
+    margin-bottom: 36px;
+  }
+  .salutation {
+    margin-bottom: 20px;
+    font-size: 18px;
+  }
+  p {
+    margin-bottom: 18px;
+    text-align: justify;
+    hyphens: auto;
+  }
+  h2 {
+    font-family: 'EB Garamond', serif;
+    font-weight: 700;
+    font-size: 19px;
+    letter-spacing: 0.02em;
+    margin: 36px 0 14px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--ink);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .pull-quote {
+    font-style: italic;
+    font-size: 21px;
+    line-height: 1.4;
+    color: var(--accent);
+    border-left: 3px solid var(--accent);
+    padding: 8px 0 8px 22px;
+    margin: 24px 0;
+  }
+  ul.priorities {
+    list-style: none;
+    margin: 16px 0 24px;
+  }
+  ul.priorities li {
+    padding: 14px 0 14px 50px;
+    position: relative;
+    border-bottom: 1px dotted rgba(26,26,26,0.2);
+  }
+  ul.priorities li:last-child { border-bottom: none; }
+  ul.priorities li::before {
+    content: attr(data-num);
+    position: absolute;
+    left: 0;
+    top: 14px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: 0.1em;
+    font-weight: 500;
+  }
+  .priority-title {
+    font-weight: 600;
+    display: block;
+    margin-bottom: 4px;
+  }
+  .table-roadmap {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 18px 0 28px;
+    font-size: 16px;
+  }
+  .table-roadmap th {
+    text-align: left;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 2px solid var(--ink);
+    padding: 8px 10px 8px 0;
+  }
+  .table-roadmap td {
+    padding: 10px 10px 10px 0;
+    border-bottom: 1px solid rgba(26,26,26,0.12);
+    vertical-align: top;
+  }
+  .table-roadmap td:first-child {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--accent);
+    white-space: nowrap;
+  }
+  .status-active { font-weight: 600; }
+  .status-maint { color: var(--muted); }
+  .status-ice { color: var(--muted); font-style: italic; }
+  .signature {
+    margin-top: 50px;
+    padding-top: 24px;
+    border-top: 1px solid var(--ink);
+  }
+  .sig-name {
+    font-family: 'EB Garamond', serif;
+    font-style: italic;
+    font-size: 22px;
+    margin-bottom: 4px;
+  }
+  .sig-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  em { font-style: italic; }
+  strong { font-weight: 600; }
+  @media (max-width: 600px) {
+    .page { padding: 40px 28px 60px; }
+    .page::before { display: none; }
+    h1.subject { font-size: 22px; }
+    p { text-align: left; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="letterhead">
+    <div class="brand">Norric</div>
+    <div class="brand-sub">Sweden's Private Epistemic Infrastructure</div>
+  </div>
+
+  <div class="meta">
+    <div class="meta-row">
+      <span class="meta-label">From</span>
+      <span>Edgar Mutebi</span>
+    </div>
+    <div class="meta-row">
+      <span class="meta-label">Re</span>
+      <span>Q2 Focus & Distribution Thesis</span>
+    </div>
+    <div class="meta-row">
+      <span class="meta-label">Date</span>
+      <span>1 May 2026 · Malmö</span>
+    </div>
+  </div>
+
+  <h1 class="subject">Following our meeting: how I'm reading the feedback, and what changes Monday morning.</h1>
+
+  <p class="salutation">Dear partners,</p>
+
+  <p>Thank you for the meeting and the directness of the feedback. The notes that followed me back to Malmö were these: simplify the score, broaden the entry surface, retain the user database, kill the 5 kr search line, and use Kreditvakt as the wedge for the rest of the portfolio. I want to confirm I heard the underlying signal, because I think it goes one layer deeper than the surface changes you suggested.</p>
+
+  <h2>The Read</h2>
+
+  <p>The literal feedback was about pricing tiers and a score scale. The deeper instruction — at least, the one I've taken — is that <strong>Kreditvakt's user database <em>is</em> the distribution channel for everything else Norric will ship.</strong> Not the brand halo. Not the sales relationship. The database itself.</p>
+
+  <p class="pull-quote">If Kreditvakt acquires 10,000 verified Swedish business users in the next twelve months, then SIGNAL, Vigil, and Sigvik launch to 10,000 pre-qualified buyers. The customer acquisition cost on products two through six approaches zero.</p>
+
+  <p>This reframes the Free tier from a marketing funnel into an asset acquisition channel. Every user query is a signal — about which Swedish companies are being investigated, by whom, and how often. Aggregated, that signal becomes a product Norric can sell back to the market: not <em>"Bolag Y looked at you,"</em> which is a legal landmine, but <em>"interest in this sector is up 40% this month,"</em> which is a sellable index. This is the institutional-grade analogue to what Klarna and Tink built on consumer data, applied to the B2B credit layer.</p>
+
+  <h2>Q2 Roadmap</h2>
+
+  <p>The honest implication of "use Kreditvakt to launch the rest" is that I cannot continue building eight products at once. Below is what gets built, what gets maintained, and what goes on ice this quarter. I'm sharing this because I'd rather be explicit about tradeoffs than vague about progress.</p>
+
+  <table class="table-roadmap">
+    <thead>
+      <tr>
+        <th>Status</th>
+        <th>Product</th>
+        <th>Q2 Commitment</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="status-active">Active</td>
+        <td><strong>Kreditvakt</strong></td>
+        <td>Close Norion + Serafim. Ship 5-tier pricing. Build user database to 1,000 verified accounts.</td>
+      </tr>
+      <tr>
+        <td class="status-active">Active</td>
+        <td><strong>Norric MCP</strong></td>
+        <td>Monetisation layer ships. API key middleware + Stripe issuance. Distribution surface for the database thesis.</td>
+      </tr>
+      <tr>
+        <td class="status-maint">Maintenance</td>
+        <td>Sigvik</td>
+        <td>Backend pipeline runs. No new feature work. F3 verification stays paused.</td>
+      </tr>
+      <tr>
+        <td class="status-ice">On ice</td>
+        <td>Norric SIGNAL</td>
+        <td>Launches Q3 to the Kreditvakt user base. GDPR architecture frozen until then.</td>
+      </tr>
+      <tr>
+        <td class="status-ice">On ice</td>
+        <td>Norric Vigil</td>
+        <td>Codebase complete. Awaits Q3 launch into existing user base.</td>
+      </tr>
+      <tr>
+        <td class="status-ice">On ice</td>
+        <td>SiteLoop</td>
+        <td>Malmö pilot continues. No expansion. Göteborg/Stockholm push deferred to Q4.</td>
+      </tr>
+      <tr>
+        <td class="status-ice">On ice</td>
+        <td>Skolradar, Jarvis</td>
+        <td>No active work. Re-evaluated end of Q3.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>The Five Kreditvakt Decisions</h2>
+
+  <ul class="priorities">
+    <li data-num="01">
+      <span class="priority-title">Score: 0–20 with action labels.</span>
+      The internal model stays at 0–100 (the backtested 6x lift factor depends on it). The displayed score becomes 0–20 in five bands, labelled as decisions — <em>Stabil, Bevaka, Förhöjd risk, Kräv säkerhet, Stoppa krediter</em> — not adjectives. Hysteresis built in so a one-point internal shift does not cause band-hopping.
+    </li>
+    <li data-num="02">
+      <span class="priority-title">Five tiers, not six.</span>
+      Free (registered, 25 lookups/mo), Silver 499 kr, Guld 1,499 kr, Premium 4,999 kr, Enterprise negotiated. The 5 kr search line is retired entirely — it was a willingness-to-pay anchor that contaminated everything above it.
+    </li>
+    <li data-num="03">
+      <span class="priority-title">Free tier is a data acquisition channel.</span>
+      Email + organisation number required at signup. BankID gating added in Q3 if signup quality degrades. Every user becomes part of Norric's identity layer, reusable across SIGNAL, Vigil, and Sigvik when they launch.
+    </li>
+    <li data-num="04">
+      <span class="priority-title">Granular debt breakdown is the moat.</span>
+      Built but gated behind Guld+. Personal-data fields (creditor identity for sole proprietors) carved out at the architecture level — not a policy decision, an architectural one. This is what Creditsafe and UC don't show, and it's what makes the renewal stick.
+    </li>
+    <li data-num="05">
+      <span class="priority-title">Enterprise pricing leaves the website.</span>
+      Replaced with <em>"Contact sales"</em>. Anchoring effect of negotiated pricing only works if it isn't pre-anchored on a public page.
+    </li>
+  </ul>
+
+  <h2>The Risk I'm Watching</h2>
+
+  <p>The bet underneath this memo is that Norric becomes valuable through accumulation — sensor by sensor, user by user, query by query — and that the Kreditvakt user database is the substrate the rest of the portfolio compounds on top of. The risk is that I am wrong about which product earns the most expensive seat at the table, and I am betting the quarter on Kreditvakt being it. If by end of Q2 we have not closed at least three paying contracts and crossed 1,000 verified Free users, the thesis needs revisiting at the start of Q3.</p>
+
+  <p>I will send a tracking dashboard within two weeks so you can watch the signals that matter rather than relying on quarterly updates.</p>
+
+  <div class="signature">
+    <div class="sig-name">Edgar Mutebi</div>
+    <div class="sig-title">Founder · Norric AB</div>
+  </div>
+
+</div>
+</body>
+</html>
