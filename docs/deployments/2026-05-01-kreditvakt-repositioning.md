@@ -79,7 +79,51 @@ Deprecated fields (`insolvency_score`, `risk_band`) retained in all responses. S
 
 ---
 
-## Migrations to run (in order)
+## Production Deployment Status (2026-05-02)
+
+### Migrations — DONE
+| Migration | Status | Notes |
+|---|---|---|
+| T2_001_create_company_scores | ✅ Applied | Was missing from DB despite April 29 record |
+| T2_004_add_hysteresis | ✅ Applied | 0 rows backfilled (table was empty) |
+| T2_005_create_users | ✅ Applied | Inline fix: `DO $$ BEGIN CREATE TYPE...EXCEPTION WHEN duplicate_object` |
+| T2_006_create_query_log | ✅ Applied | `query_log` table + `sector_interest_counts` view |
+| T2_007_create_quota_view | ✅ Applied | `current_month_quota()` function verified |
+
+### Stripe — DONE
+| Resource | ID |
+|---|---|
+| Silver product | `prod_URX5Rf7NLVELVp` |
+| Guld product | `prod_URX5yhiQf2dTtp` |
+| Premium product | `prod_URX5pVZmYJvvHf` |
+| `STRIPE_PRICE_SILVER` | `price_1TSe0xCwlxixyssOqzLVVuCp` (5,988 SEK/year) |
+| `STRIPE_PRICE_GULD` | `price_1TSe0yCwlxixyssOiTLqah7r` (17,988 SEK/year) |
+| `STRIPE_PRICE_PREMIUM` | `price_1TSe10CwlxixyssOqvRiD4pM` (59,988 SEK/year) |
+| Webhook endpoint | `we_1TSdhnCwlxixyssOOuqSCsbN` → `https://norric-mcp.railway.app/billing/webhook` |
+
+Note: All prices are test mode (`sk_test_`). Swap `STRIPE_SECRET_KEY` to live key before going live.
+
+### Railway env vars (Kreditvakt service `79cb30dd`) — DONE
+All 6 vars set and confirmed via API. Deployment `f4f44f76` succeeded (SUCCESS).
+
+```
+STRIPE_SECRET_KEY         = sk_test_51JHwU7... (test mode)
+STRIPE_PRICE_SILVER       = price_1TSe0xCwlxixyssOqzLVVuCp
+STRIPE_PRICE_GULD         = price_1TSe0yCwlxixyssOiTLqah7r
+STRIPE_PRICE_PREMIUM      = price_1TSe10CwlxixyssOqvRiD4pM
+STRIPE_WEBHOOK_SECRET     = whsec_85fpvgbkGRuQ8q76xENc11hzlmB5spGY
+KREDITVAKT_DISPLAY_SCORE_V2 = false  (feature flag — flip to true after smoke tests)
+```
+
+### Smoke tests — PENDING
+Service has no public HTTP domain (Railway private network only). Smoke tests must be run from within the Railway project or via the MCP client. Once verified:
+1. Flip `KREDITVAKT_DISPLAY_SCORE_V2=true` on the Kreditvakt Railway service
+2. Redeploy
+3. Monitor error rate for 30 minutes
+
+---
+
+## Migrations to run (in order) — HISTORICAL REFERENCE
 
 ```
 T2_004_add_hysteresis_to_company_scores.sql
@@ -88,14 +132,14 @@ T2_006_create_query_log.sql
 T2_007_create_quota_view.sql
 ```
 
-Run in Supabase SQL Editor, one at a time, in this order.
+These have all been applied to production as of 2026-05-02.
 
-## Env vars to add to Railway (norric-mcp)
+## Env vars added to Railway (norric-mcp / Kreditvakt service) — APPLIED
 
 ```
-STRIPE_SECRET_KEY         (test mode for staging, live for production)
-STRIPE_PRICE_SILVER       (Stripe price ID for silver_499_annual)
-STRIPE_PRICE_GULD         (Stripe price ID for guld_1499_annual)
-STRIPE_PRICE_PREMIUM      (Stripe price ID for premium_4999_annual)
-STRIPE_WEBHOOK_SECRET     (from Stripe dashboard → Webhooks)
+STRIPE_SECRET_KEY         (test mode — swap for live before launch)
+STRIPE_PRICE_SILVER       price_1TSe0xCwlxixyssOqzLVVuCp
+STRIPE_PRICE_GULD         price_1TSe0yCwlxixyssOiTLqah7r
+STRIPE_PRICE_PREMIUM      price_1TSe10CwlxixyssOqvRiD4pM
+STRIPE_WEBHOOK_SECRET     whsec_85fpvgbkGRuQ8q76xENc11hzlmB5spGY
 ```
