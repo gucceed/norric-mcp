@@ -115,7 +115,7 @@ class NorricAuthMiddleware:
             await _send_json(send, {"error": "Unauthorized", "code": 401}, 401)
             return
 
-        api_key: ApiKey | None = validate_key(raw_key)
+        api_key: ApiKey | None = await asyncio.to_thread(validate_key, raw_key)
         if api_key is None:
             await _send_json(send, {"error": "Unauthorized", "code": 401}, 401)
             return
