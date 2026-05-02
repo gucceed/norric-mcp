@@ -7,7 +7,9 @@ import secrets
 
 def generate_api_key() -> tuple[str, str]:
     """Returns (raw_key, hash). Send raw_key to customer. Store hash."""
-    raw = "nrc_" + secrets.token_urlsafe(32)
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    suffix = "".join(secrets.choice(alphabet) for _ in range(32))
+    raw = "nrk_" + suffix
     h = hashlib.sha256(raw.encode()).hexdigest()
     return raw, h
 

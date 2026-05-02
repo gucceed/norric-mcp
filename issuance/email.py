@@ -45,7 +45,7 @@ def _send_via_sendgrid(to_email: str, raw_key: str, tier: str, api_key: str) -> 
                         f"  -- or --\n"
                         f"  X-Norric-Key: {raw_key}\n\n"
                         f"Endpoint: https://norric-mcp-production.up.railway.app/mcp\n\n"
-                        f"Documentation: https://norric.io/api\n\n"
+                        f"Documentation: https://norric.io/developer-docs.html\n\n"
                         f"Keep this key secret. Do not share it.\n"
                         f"If it is compromised, email hej@norric.io.\n\n"
                         f"Norric AB · Malmö, Sweden"
