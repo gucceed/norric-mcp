@@ -1,29 +1,22 @@
 """
-Tier policy — which tools are accessible per tier.
+Tier policy — which tools are accessible per tier and per-minute rate limits.
 
-free       : status and explain tools only, max 100 calls/day
-standard   : all tools, max 10_000 calls/day
-compliance : all tools, unlimited, includes audit log access
+free       : norric_status_v1 only, 50 calls/month (DB), 5 calls/minute (in-memory)
+standard   : all tools, no call cap
+compliance : all tools, no call cap, includes audit log access
 """
-from collections import defaultdict
-from datetime import date
+import time
+from collections import defaultdict, deque
 from typing import Optional
 
 FREE_TOOLS = {
     "norric_status_v1",
-    "norric_explain_score_v1",
-    "norric_data_freshness_v1",
 }
 
-RATE_LIMITS: dict[str, Optional[int]] = {
-    "free":       100,
-    "standard":   10_000,
-    "compliance": None,      # unlimited
-}
+FREE_RATE_PER_MIN = 5
 
-# In-memory call counter: {key_hash: {date_str: count}}
-# Resets implicitly when date changes. Not persistent across restarts.
-_counters: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+# Sliding-window per-minute tracker: {key_hash: deque of monotonic timestamps}
+_rate_window: dict[str, deque] = defaultdict(deque)
 
 
 def tool_allowed(tool_name: str, tier: str) -> bool:
@@ -34,24 +27,17 @@ def tool_allowed(tool_name: str, tier: str) -> bool:
     return False
 
 
-def rate_limit_for(tier: str) -> Optional[int]:
-    return RATE_LIMITS.get(tier)
-
-
-def check_and_increment(key_hash: str, tier: str) -> bool:
+def check_rate_limit(key_hash: str) -> bool:
     """
-    Returns True if the call is within rate limits and increments the counter.
-    Returns False if the daily limit is exceeded.
-    Compliance tier always returns True (unlimited).
+    Returns True if the key is within 5 calls/minute, and records the call.
+    Returns False if the limit is exceeded (do not record).
+    Only applies to Free tier — caller is responsible for gating by tier.
     """
-    limit = rate_limit_for(tier)
-    if limit is None:
-        return True
-
-    today = date.today().isoformat()
-    current = _counters[key_hash][today]
-    if current >= limit:
+    now = time.monotonic()
+    window = _rate_window[key_hash]
+    while window and now - window[0] > 60.0:
+        window.popleft()
+    if len(window) >= FREE_RATE_PER_MIN:
         return False
-
-    _counters[key_hash][today] += 1
+    window.append(now)
     return True

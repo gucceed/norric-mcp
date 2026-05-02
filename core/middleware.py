@@ -7,17 +7,22 @@ Auth flow:
   1. Exempt: GET /health, GET /, POST /mcp where body.method == "initialize"
   2. Extract key from Authorization: Bearer {key} or X-Norric-Key: {key}
   3. Validate key hash — 401 if absent or unknown
-  4. For tools/call: check tool_allowed(tool_name, tier) — 403 if blocked
-  5. Check daily rate limit — 429 if exceeded
-  6. Attach ApiKey to ASGI scope["norric_api_key"] for downstream use
+  4. For tools/call:
+       a. check tool_allowed(tool_name, tier) — 403 if blocked
+       b. Free tier only: check per-minute rate limit (5/min) — 429 if exceeded
+       c. Free tier only: check+increment monthly quota in DB (50/month) — 429 if exceeded
+  5. Attach ApiKey to ASGI scope["norric_api_key"] for downstream use
 """
+import asyncio
 import json
 from typing import Callable
 
 from core.api_keys import ApiKey, validate_key
-from core.tier_policy import check_and_increment, tool_allowed
+from core.tier_policy import check_rate_limit, tool_allowed
+from core.quota import check_and_increment_quota
 
 _EXEMPT_PATHS = {"/health", "/"}
+_UPGRADE_URL = "https://norric.io/pricing"
 
 
 async def _send_json(send: Callable, body: dict, status: int) -> None:
@@ -54,8 +59,6 @@ def _make_receive(body: bytes) -> Callable:
         if not sent:
             sent = True
             return {"type": "http.request", "body": body, "more_body": False}
-        # Subsequent calls block indefinitely (client disconnect simulation)
-        import asyncio
         await asyncio.sleep(1e9)
 
     return receive
@@ -73,7 +76,6 @@ class NorricAuthMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        # Pass through non-HTTP connections (WebSocket, lifespan)
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
@@ -81,12 +83,10 @@ class NorricAuthMiddleware:
         path = scope.get("path", "")
         method = scope.get("method", "")
 
-        # Always exempt health and root
         if path in _EXEMPT_PATHS:
             await self.app(scope, receive, send)
             return
 
-        # For /mcp POST, we must read the body to inspect method and tool name
         body = b""
         parsed = None
         if path == "/mcp" and method == "POST":
@@ -96,7 +96,6 @@ class NorricAuthMiddleware:
             except (json.JSONDecodeError, ValueError):
                 pass
 
-        # Exempt the MCP initialize handshake — client must open session before presenting key
         if parsed is not None and parsed.get("method") == "initialize":
             await self.app(scope, _make_receive(body), send)
             return
@@ -129,27 +128,46 @@ class NorricAuthMiddleware:
                 await _send_json(
                     send,
                     {
-                        "error": "Tool not available on your tier",
-                        "upgrade_url": "https://norric.io/api",
+                        "error": "tool_not_available",
+                        "tier": api_key.tier,
+                        "upgrade_url": _UPGRADE_URL,
                     },
                     403,
                 )
                 return
 
-            if not check_and_increment(api_key.hash, api_key.tier):
-                await _send_json(
-                    send,
-                    {
-                        "error": "Daily rate limit exceeded",
-                        "upgrade_url": "https://norric.io/api",
-                    },
-                    429,
-                )
-                return
+            if api_key.tier == "free":
+                # Per-minute rate limit (in-memory, no DB)
+                if not check_rate_limit(api_key.hash):
+                    await _send_json(
+                        send,
+                        {
+                            "error": "rate_limit_exceeded",
+                            "limit": 5,
+                            "window": "1 minute",
+                            "tier": "free",
+                            "upgrade_url": _UPGRADE_URL,
+                        },
+                        429,
+                    )
+                    return
 
-        # Attach key to scope for downstream handlers (audit logging etc.)
+                # Monthly quota (DB-backed)
+                allowed = await asyncio.to_thread(check_and_increment_quota, api_key.hash)
+                if not allowed:
+                    await _send_json(
+                        send,
+                        {
+                            "error": "monthly_quota_exceeded",
+                            "limit": 50,
+                            "tier": "free",
+                            "upgrade_url": _UPGRADE_URL,
+                        },
+                        429,
+                    )
+                    return
+
         scope["norric_api_key"] = api_key
 
-        # Forward request — reconstruct receive if body was consumed
         downstream_receive = _make_receive(body) if body else receive
         await self.app(scope, downstream_receive, send)
