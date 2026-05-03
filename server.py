@@ -1259,11 +1259,15 @@ _NORRIC_API_KEYS_ENV = os.environ.get("NORRIC_API_KEYS", "")
 _VALID_KEYS = set(k.strip() for k in _NORRIC_API_KEYS_ENV.split(",") if k.strip())
 
 
+_OPEN_PATHS = {"/health", "/signup/free", "/checkout", "/webhooks/stripe"}
+
+
 class _NorricAuthMiddleware:
     """
     Pure-ASGI Bearer token middleware.
     Uses NORRIC_API_KEYS env var (comma-separated plain keys).
-    /health is always open. Open mode if env var is not set.
+    /health, /signup/free, /checkout, /webhooks/stripe are always open.
+    Open mode if env var is not set.
     Pure ASGI (not BaseHTTPMiddleware) so it never buffers streaming SSE.
     """
 
@@ -1277,8 +1281,8 @@ class _NorricAuthMiddleware:
 
         path = scope.get("path", "")
 
-        # Health check always open
-        if path == "/health":
+        # Public routes — no auth required
+        if path in _OPEN_PATHS:
             await self.app(scope, receive, send)
             return
 
@@ -1378,14 +1382,24 @@ async def _health_handler(scope, receive, send):
     await resp(scope, receive, send)
 
 
-# ── Composite ASGI: /health + MCP (all other paths) ───────────────────────────
+# ── Composite ASGI: /health + issuance + MCP (all other paths) ────────────────
 _mcp_asgi = mcp.http_app()
+
+from issuance.main import app as _issuance_app  # noqa: E402
+
+_ISSUANCE_PATHS = {"/signup/free", "/checkout", "/webhooks/stripe"}
 
 
 async def _router(scope, receive, send):
-    """Route /health to the health handler; everything else to FastMCP."""
-    if scope["type"] == "http" and scope.get("path") == "/health":
-        await _health_handler(scope, receive, send)
+    """Route /health, issuance paths, and everything else to FastMCP."""
+    if scope["type"] == "http":
+        path = scope.get("path", "")
+        if path == "/health":
+            await _health_handler(scope, receive, send)
+        elif path in _ISSUANCE_PATHS:
+            await _issuance_app(scope, receive, send)
+        else:
+            await _mcp_asgi(scope, receive, send)
     else:
         await _mcp_asgi(scope, receive, send)
 
