@@ -82,6 +82,20 @@ def _store_key(key_hash: str, tier: str, email: str, org_nr: str | None) -> None
         db.close()
 
 
+def _free_org_exists(org_nr: str) -> bool:
+    """Return True if this org_nr already has an active free-tier key."""
+    from ingestion.db import Session
+    db = Session()
+    try:
+        row = db.execute(
+            text("SELECT 1 FROM api_keys WHERE org_nr = :o AND tier = 'free' AND status = 'active' LIMIT 1"),
+            {"o": org_nr},
+        ).fetchone()
+        return row is not None
+    finally:
+        db.close()
+
+
 def _issue_key(tier: str, email: str, org_nr: str | None) -> str:
     """Generate, store, and email a key. Returns the raw key."""
     raw_key, key_hash = generate_api_key()
@@ -186,6 +200,11 @@ class FreeSignupRequest(BaseModel):
 
 @app.post("/signup/free", status_code=201)
 async def signup_free(body: FreeSignupRequest):
+    if _free_org_exists(body.org_nr):
+        raise HTTPException(
+            status_code=409,
+            detail="Din organisation har redan ett konto. Logga in eller uppgradera din plan.",
+        )
     raw_key = _issue_key("free", body.email, body.org_nr)
     return {
         "tier": "free",

@@ -152,14 +152,16 @@ class NorricAuthMiddleware:
                     )
                     return
 
-                # Monthly quota (DB-backed)
-                allowed = await asyncio.to_thread(check_and_increment_quota, api_key.hash)
+                # Monthly quota (DB-backed, keyed on org_nr)
+                quota_key = api_key.org_nr or api_key.hash
+                allowed = await asyncio.to_thread(check_and_increment_quota, quota_key)
                 if not allowed:
                     await _send_json(
                         send,
                         {
                             "error": "monthly_quota_exceeded",
-                            "limit": 50,
+                            "message": "Din organisation har nått månadsgränsen på 10 sökningar.",
+                            "limit": 10,
                             "tier": "free",
                             "upgrade_url": _UPGRADE_URL,
                         },

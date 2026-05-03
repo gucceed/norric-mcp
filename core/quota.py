@@ -1,8 +1,11 @@
 """
 Monthly quota enforcement for Free-tier API keys.
 
+Quota is tracked at the organisation level (org_nr), not per key.
+All keys under the same org_nr share one 50-call/month pool.
+
 Quota: 50 calls/month. Resets on the 1st at 00:00 UTC.
-State is persisted in the quota_usage table (T2_008).
+State is persisted in the quota_usage table (T2_008, re-keyed in T2_010).
 
 Call check_and_increment_quota() inside asyncio.to_thread() — it is synchronous.
 """
@@ -12,7 +15,7 @@ from datetime import datetime, timezone
 from sqlalchemy import text
 
 
-_FREE_MONTHLY_LIMIT = 50
+_FREE_MONTHLY_LIMIT = 10
 
 
 def _month_boundaries(now: datetime) -> tuple[datetime, datetime]:
@@ -25,11 +28,12 @@ def _month_boundaries(now: datetime) -> tuple[datetime, datetime]:
     return period_start, reset_at
 
 
-def check_and_increment_quota(key_hash: str) -> bool:
+def check_and_increment_quota(org_nr: str) -> bool:
     """
-    Returns True if the call is within the monthly quota and records it.
-    Returns False if the caller has hit 50 calls for the current month.
+    Returns True if the org's monthly quota has not been exhausted, and records the call.
+    Returns False if the org has hit 50 calls for the current month.
 
+    All keys under the same org_nr share this pool.
     Handles period reset automatically when reset_at has passed.
     Uses FOR UPDATE to be safe under concurrent requests.
     """
@@ -41,17 +45,17 @@ def check_and_increment_quota(key_hash: str) -> bool:
     db = Session()
     try:
         row = db.execute(
-            text("SELECT call_count, reset_at FROM quota_usage WHERE key_hash = :h FOR UPDATE"),
-            {"h": key_hash},
+            text("SELECT call_count, reset_at FROM quota_usage WHERE org_nr = :o FOR UPDATE"),
+            {"o": org_nr},
         ).fetchone()
 
         if row is None:
             db.execute(
                 text("""
-                    INSERT INTO quota_usage (key_hash, call_count, period_start, reset_at)
-                    VALUES (:h, 1, :ps, :ra)
+                    INSERT INTO quota_usage (org_nr, call_count, period_start, reset_at)
+                    VALUES (:o, 1, :ps, :ra)
                 """),
-                {"h": key_hash, "ps": period_start, "ra": reset_at},
+                {"o": org_nr, "ps": period_start, "ra": reset_at},
             )
             db.commit()
             return True
@@ -65,9 +69,9 @@ def check_and_increment_quota(key_hash: str) -> bool:
                 text("""
                     UPDATE quota_usage
                     SET call_count=1, period_start=:ps, reset_at=:ra
-                    WHERE key_hash=:h
+                    WHERE org_nr=:o
                 """),
-                {"h": key_hash, "ps": period_start, "ra": reset_at},
+                {"o": org_nr, "ps": period_start, "ra": reset_at},
             )
             db.commit()
             return True
@@ -76,8 +80,8 @@ def check_and_increment_quota(key_hash: str) -> bool:
             return False
 
         db.execute(
-            text("UPDATE quota_usage SET call_count=call_count+1 WHERE key_hash=:h"),
-            {"h": key_hash},
+            text("UPDATE quota_usage SET call_count=call_count+1 WHERE org_nr=:o"),
+            {"o": org_nr},
         )
         db.commit()
         return True

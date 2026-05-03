@@ -14,8 +14,9 @@ from typing import Optional
 @dataclass(frozen=True)
 class ApiKey:
     hash: str
-    tier: str   # free | standard | compliance
-    label: str  # email address — never returned to caller
+    tier: str           # free | standard | compliance
+    label: str          # email address — never returned to caller
+    org_nr: str | None  # 10-digit org number — used for org-level quota
 
 
 def validate_key(raw_key: str) -> Optional[ApiKey]:
@@ -31,12 +32,12 @@ def validate_key(raw_key: str) -> Optional[ApiKey]:
     db = Session()
     try:
         row = db.execute(
-            text("SELECT key_hash, tier, email FROM api_keys WHERE key_hash = :h AND status = 'active'"),
+            text("SELECT key_hash, tier, email, org_nr FROM api_keys WHERE key_hash = :h AND status = 'active'"),
             {"h": h},
         ).fetchone()
         if row is None:
             return None
-        return ApiKey(hash=row.key_hash, tier=row.tier, label=row.email)
+        return ApiKey(hash=row.key_hash, tier=row.tier, label=row.email, org_nr=row.org_nr)
     finally:
         db.close()
 

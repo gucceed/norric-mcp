@@ -7,7 +7,7 @@ import os
 log = logging.getLogger(__name__)
 
 _FROM = "edgar@norric.io"
-_QUOTA_BY_TIER = {"free": 50, "standard": None, "compliance": None}
+_QUOTA_BY_TIER = {"free": 10, "standard": None, "compliance": None}
 
 
 def _body(raw_key: str, tier: str) -> str:
