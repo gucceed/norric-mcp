@@ -4,7 +4,7 @@ Norric MCP — ASGI authentication and tier-enforcement middleware.
 Pure ASGI (not BaseHTTPMiddleware) so streaming MCP responses are never buffered.
 
 Auth flow:
-  1. Exempt: GET /health, GET /, POST /mcp where body.method == "initialize"
+  1. Exempt: GET /health, GET /, /signup/free, /checkout, /webhooks/stripe, POST /mcp where body.method == "initialize"
   2. Extract key from Authorization: Bearer {key} or X-Norric-Key: {key}
   3. Validate key hash — 401 if absent or unknown
   4. For tools/call:
@@ -21,7 +21,7 @@ from core.api_keys import ApiKey, validate_key
 from core.tier_policy import check_rate_limit, tool_allowed
 from core.quota import check_and_increment_quota
 
-_EXEMPT_PATHS = {"/health", "/"}
+_EXEMPT_PATHS = {"/health", "/", "/signup/free", "/checkout", "/webhooks/stripe"}
 _UPGRADE_URL = "https://norric.io/pricing"
 
 
