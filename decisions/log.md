@@ -11,7 +11,11 @@
 
 **Verification:** `POST /signup/free` returns 500 (not 401) — auth exemption confirmed working. The 500 is a DB connectivity issue (see below), not an auth regression.
 
-**Open infrastructure issue:** `ingestion/db.py` DB connection fails with `could not translate host name "aws-1-us-east1.pooler.supabase.com"` — Supabase pooler hostname not resolvable from Railway's network. Resolution: set `DATABASE_URL` in Railway to use the direct Supabase connection string (session mode, port 5432) instead of the pooler URL. Also added `psycopg2-binary` and forced psycopg2 dialect in `ingestion/db.py` since the synchronous Session is incompatible with asyncpg.
+**Resolved (2026-05-04):** Original pooler URL `aws-1-us-east1.pooler.supabase.com` had a typo (missing dash before zone number); Railway DNS couldn't resolve it. Direct DB host (`db.xmifxnhpufsckihregym.supabase.co`) resolves only to IPv6 which Railway can't reach (no Supabase IPv4 add-on). Fixed by updating `DATABASE_URL` in Railway to the correctly-formatted session pooler: `postgresql+psycopg2://postgres.xmifxnhpufsckihregym:***@aws-1-us-east-1.pooler.supabase.com:5432/postgres`. Also added `psycopg2-binary` and forced psycopg2 dialect in `ingestion/db.py` (synchronous SQLAlchemy is incompatible with asyncpg). Verified: `/signup/free` returns 201 with issued key.
+
+**Open issues (out of scope for this fix):**
+- `SENDGRID_API_KEY` not set in Railway — email delivery falls back to stdout log, keys not emailed to users
+- `_NorricAuthMiddleware` validates against `NORRIC_API_KEYS` env var only; DB-issued keys return 401 on MCP calls — middleware must query DB to validate issued keys
 
 **Reversibility:** High — revert by removing `_OPEN_PATHS` entries and the `_issuance_app` import.
 
