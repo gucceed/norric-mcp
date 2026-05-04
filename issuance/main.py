@@ -180,11 +180,15 @@ def _handle_completed_checkout(session: dict) -> None:
 
 class FreeSignupRequest(BaseModel):
     email: str
-    org_nr: str
+    org_nr: str = ""
+    company: str = ""
+    use_case: str = ""
 
     @field_validator("org_nr")
     @classmethod
     def validate_org_nr(cls, v: str) -> str:
+        if not v:
+            return v
         cleaned = re.sub(r"[-\s]", "", v)
         if not _ORG_NR_RE.match(cleaned):
             raise ValueError("org_nr must be exactly 10 digits")
@@ -200,12 +204,13 @@ class FreeSignupRequest(BaseModel):
 
 @app.post("/signup/free", status_code=201)
 async def signup_free(body: FreeSignupRequest):
-    if _free_org_exists(body.org_nr):
+    if body.org_nr and _free_org_exists(body.org_nr):
         raise HTTPException(
             status_code=409,
             detail="Din organisation har redan ett konto. Logga in eller uppgradera din plan.",
         )
-    raw_key = _issue_key("free", body.email, body.org_nr)
+    org_nr = body.org_nr or None
+    raw_key = _issue_key("free", body.email, org_nr)
     return {
         "tier": "free",
         "api_key": raw_key,
@@ -213,5 +218,5 @@ async def signup_free(body: FreeSignupRequest):
             "Keep this key secret — it will not be shown again. "
             "A copy has been sent to your email address."
         ),
-        "docs": "https://norric.io/developer-docs.html",
+        "docs": "https://kreditvakt.com/docs",
     }
