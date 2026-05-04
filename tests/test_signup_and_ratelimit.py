@@ -157,7 +157,7 @@ class TestSearchCap:
     def test_first_search_allowed(self):
         from core.db_auth import check_and_increment_searches, _FREE_SEARCHES_LIMIT
         db = self._make_db_with_count(0)
-        with patch("core.db_auth.Session", return_value=db):
+        with patch("ingestion.db.Session", return_value=db):
             allowed, used, limit = check_and_increment_searches("testhash")
         assert allowed is True
         assert used == 1
@@ -166,14 +166,14 @@ class TestSearchCap:
     def test_ninth_search_allowed(self):
         from core.db_auth import check_and_increment_searches, _FREE_SEARCHES_LIMIT
         db = self._make_db_with_count(9)
-        with patch("core.db_auth.Session", return_value=db):
+        with patch("ingestion.db.Session", return_value=db):
             allowed, used, limit = check_and_increment_searches("testhash")
         assert allowed is True
 
     def test_at_cap_returns_false(self):
         from core.db_auth import check_and_increment_searches, _FREE_SEARCHES_LIMIT
         db = self._make_db_with_count(_FREE_SEARCHES_LIMIT)
-        with patch("core.db_auth.Session", return_value=db):
+        with patch("ingestion.db.Session", return_value=db):
             allowed, used, limit = check_and_increment_searches("testhash")
         assert allowed is False
         assert used == _FREE_SEARCHES_LIMIT
@@ -181,7 +181,7 @@ class TestSearchCap:
     def test_increment_not_called_when_cap_reached(self):
         from core.db_auth import check_and_increment_searches, _FREE_SEARCHES_LIMIT
         db = self._make_db_with_count(_FREE_SEARCHES_LIMIT)
-        with patch("core.db_auth.Session", return_value=db):
+        with patch("ingestion.db.Session", return_value=db):
             check_and_increment_searches("testhash")
         # UPDATE should not have been called — only SELECT FOR UPDATE
         update_calls = [

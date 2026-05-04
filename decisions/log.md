@@ -89,6 +89,21 @@
 
 ## 2026-05-04
 
+### Risk taxonomy: Kreditvakt bands and Sigvik labels are intentionally independent
+
+**Decision:** Kreditvakt risk bands and Sigvik intent/confidence labels are different scoring axes and must not be unified.
+
+- **Kreditvakt** uses a 5-band risk taxonomy (Stabil / Bevaka / Förhöjd risk / Kräv säkerhet / Stoppa krediter) derived from `distress_probability` [0.0–1.0] mapped to a 0–20 display score. Source of truth: `scoring/display.py` `_BAND_LABELS` / `_BAND_ACTIONS`.
+- **Sigvik** uses a confidence label (Starkt signal / Måttlig signal / Tidig indikation) on a 0–100 intent score. It measures renovation intent and financial stress of a BRF — not credit default risk. Source of truth: `server.py` sigvik tool.
+
+**Rationale:** The two products score fundamentally different things (company insolvency risk vs. BRF property investment readiness). Forcing a shared taxonomy would make both less precise. A Kreditvakt Band 3 ("Förhöjd risk") and a Sigvik "Måttlig signal" are not the same thing and should not be conflated in copy, UI, or agent prompts.
+
+**Standing rule:** Do not introduce a cross-product risk label or shared band constant. If a future Norric product needs risk bands, define its own taxonomy in its own scoring module and log the decision here.
+
+**Review trigger:** If a cross-product dashboard or portfolio view is built that needs to compare Kreditvakt and Sigvik signals side-by-side, revisit whether a shared severity mapping is needed — but keep it as a view-layer adapter, not a shared scoring primitive.
+
+---
+
 ### Renamed Railway services in project motivated-commitment (589e3b14) for trackability
 
 **What changed:** Four services renamed via Railway GraphQL API (`serviceUpdate` mutation). Redis left unchanged.
