@@ -6,7 +6,7 @@ import os
 
 log = logging.getLogger(__name__)
 
-_FROM = "edgar@norric.io"
+_FROM = "Kreditvakt <hej@norric.io>"
 _QUOTA_BY_TIER = {"free": 10, "standard": None, "compliance": None}
 
 

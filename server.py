@@ -1265,10 +1265,15 @@ _OPEN_PATHS = {"/health", "/signup/free", "/checkout", "/webhooks/stripe"}
 class _NorricAuthMiddleware:
     """
     Pure-ASGI Bearer token middleware.
-    Uses NORRIC_API_KEYS env var (comma-separated plain keys).
-    /health, /signup/free, /checkout, /webhooks/stripe are always open.
-    Open mode if env var is not set.
-    Pure ASGI (not BaseHTTPMiddleware) so it never buffers streaming SSE.
+
+    Validation order (first match wins):
+      1. NORRIC_API_KEYS env var — plain-key list, no DB/Redis (admin / test keys)
+      2. Redis cache  — api_key:{sha256} → "valid:{tier}" | "revoked"
+      3. DB lookup    — api_keys table, status='active'
+
+    Open paths bypass auth: /health, /signup/free, /checkout, /webhooks/stripe.
+    Open mode (no NORRIC_API_KEYS and DB unreachable) is deliberately not
+    supported in production — fail closed.
     """
 
     def __init__(self, asgi_app):
@@ -1286,13 +1291,7 @@ class _NorricAuthMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # Dev/open mode — no keys configured
-        if not _VALID_KEYS:
-            logging.warning("NORRIC_API_KEYS not set — running in open mode")
-            await self.app(scope, receive, send)
-            return
-
-        # Validate Bearer token
+        # Extract Bearer token
         headers = dict(scope.get("headers", []))
         raw_auth = headers.get(b"authorization", b"").decode()
         if not raw_auth.startswith("Bearer "):
@@ -1305,7 +1304,20 @@ class _NorricAuthMiddleware:
             return
 
         key = raw_auth.removeprefix("Bearer ").strip()
-        if key not in _VALID_KEYS:
+
+        # ── 1. Env var escape hatch (fast path, no DB/Redis) ──────────────────
+        if key in _VALID_KEYS:
+            scope["norric_tier"] = "internal"
+            scope["norric_auth_source"] = "env"
+            await self.app(scope, receive, send)
+            return
+
+        # ── 2 & 3. Redis cache → DB lookup ────────────────────────────────────
+        import asyncio
+        from core.db_auth import lookup_key
+        result = await asyncio.to_thread(lookup_key, key)
+
+        if result is None:
             from starlette.responses import JSONResponse
             resp = JSONResponse(
                 {"error": "Invalid API key. Get yours at norric.io/api-keys"},
@@ -1313,6 +1325,10 @@ class _NorricAuthMiddleware:
             )
             await resp(scope, receive, send)
             return
+
+        tier, auth_source = result
+        scope["norric_tier"] = tier
+        scope["norric_auth_source"] = auth_source
 
         await self.app(scope, receive, send)
 

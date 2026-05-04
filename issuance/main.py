@@ -20,7 +20,7 @@ Environment variables:
   STRIPE_PRICE_ID_MCP_STANDARD_ANNUAL
   STRIPE_PRICE_ID_MCP_COMPLIANCE_MONTHLY
   STRIPE_PRICE_ID_MCP_COMPLIANCE_ANNUAL
-  SENDGRID_API_KEY   (optional — falls back to stdout log)
+  RESEND_API_KEY     (optional — falls back to stdout log)
 """
 from __future__ import annotations
 
