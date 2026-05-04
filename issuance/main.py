@@ -82,6 +82,10 @@ def _store_key(key_hash: str, tier: str, email: str, org_nr: str | None) -> None
         db.close()
 
 
+_FREE_ORG_CAP = 10
+_UPGRADE_URL = "mailto:hej@norric.io?subject=Silver-abonnemang%20Kreditvakt&body=Hej,%0A%0AJag%20vill%20teckna%20Silver-abonnemang%20(4%20900%20kr/mån).%0A%0AFöretag:%20%0AOrgnr:%20%0AKontaktperson:%20%0A"
+
+
 def _free_org_exists(org_nr: str) -> bool:
     """Return True if this org_nr already has an active free-tier key."""
     from ingestion.db import Session
@@ -92,6 +96,43 @@ def _free_org_exists(org_nr: str) -> bool:
             {"o": org_nr},
         ).fetchone()
         return row is not None
+    finally:
+        db.close()
+
+
+def _free_org_key_count(org_nr: str) -> tuple[int, str | None]:
+    """Return (count, org_name) of active free keys for this org_nr.
+    org_name comes from norric_entities if available."""
+    from ingestion.db import Session
+    db = Session()
+    try:
+        count_row = db.execute(
+            text("SELECT COUNT(*) FROM api_keys WHERE org_nr = :o AND tier = 'free' AND status = 'active'"),
+            {"o": org_nr},
+        ).fetchone()
+        count = count_row[0] if count_row else 0
+
+        name_row = db.execute(
+            text("SELECT name FROM norric_entities WHERE orgnr = :o LIMIT 1"),
+            {"o": org_nr},
+        ).fetchone()
+        org_name = name_row.name if name_row else None
+
+        return (count, org_name)
+    finally:
+        db.close()
+
+
+def _validate_orgnr_exists(org_nr: str) -> str | None:
+    """Check norric_entities for the org. Returns org name if found, None if not found."""
+    from ingestion.db import Session
+    db = Session()
+    try:
+        row = db.execute(
+            text("SELECT name FROM norric_entities WHERE orgnr = :o AND is_active = true LIMIT 1"),
+            {"o": org_nr},
+        ).fetchone()
+        return row.name if row else None
     finally:
         db.close()
 
@@ -180,43 +221,60 @@ def _handle_completed_checkout(session: dict) -> None:
 
 class FreeSignupRequest(BaseModel):
     email: str
-    org_nr: str = ""
+    org_nr: str
     company: str = ""
     use_case: str = ""
 
     @field_validator("org_nr")
     @classmethod
     def validate_org_nr(cls, v: str) -> str:
-        if not v:
-            return v
         cleaned = re.sub(r"[-\s]", "", v)
         if not _ORG_NR_RE.match(cleaned):
-            raise ValueError("org_nr must be exactly 10 digits")
+            raise ValueError("Ogiltigt organisationsnummer — ange 10 siffror")
         return cleaned
 
     @field_validator("email")
     @classmethod
     def validate_email(cls, v: str) -> str:
         if "@" not in v or "." not in v.split("@")[-1]:
-            raise ValueError("invalid email address")
+            raise ValueError("Ogiltig e-postadress")
         return v.lower().strip()
 
 
 @app.post("/signup/free", status_code=201)
 async def signup_free(body: FreeSignupRequest):
-    if body.org_nr and _free_org_exists(body.org_nr):
+    # Validate org exists in Bolagsverket bulk data
+    org_name = _validate_orgnr_exists(body.org_nr)
+    if org_name is None:
         raise HTTPException(
-            status_code=409,
-            detail="Din organisation har redan ett konto. Logga in eller uppgradera din plan.",
+            status_code=400,
+            detail=(
+                "Vi hittar inte detta organisationsnummer. "
+                "Om företaget är nyregistrerat kan det dröja upp till 24 timmar "
+                "innan det visas i vårt register. "
+                "Försök igen senare eller kontakta hej@norric.io."
+            ),
         )
-    org_nr = body.org_nr or None
-    raw_key = _issue_key("free", body.email, org_nr)
+
+    # Org cap: max _FREE_ORG_CAP free keys per org
+    count, _ = _free_org_key_count(body.org_nr)
+    if count >= _FREE_ORG_CAP:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "Org cap reached",
+                "message": (
+                    f"{org_name} har redan registrerat 10 Free-konton. "
+                    "Uppgradera till Silver för obegränsade konton och sökningar."
+                ),
+                "upgrade_url": _UPGRADE_URL,
+            },
+        )
+
+    raw_key = _issue_key("free", body.email, body.org_nr)
     return {
         "tier": "free",
         "api_key": raw_key,
-        "message": (
-            "Keep this key secret — it will not be shown again. "
-            "A copy has been sent to your email address."
-        ),
+        "message": "Nyckeln skickas till din e-post inom 60 sekunder.",
         "docs": "https://kreditvakt.com/docs",
     }

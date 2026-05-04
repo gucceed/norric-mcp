@@ -78,12 +78,14 @@ def _update_last_used(key_hash: str) -> None:
     threading.Thread(target=_run, daemon=True).start()
 
 
-def lookup_key(raw_key: str) -> Optional[tuple[str, str]]:
+def lookup_key(raw_key: str) -> Optional[tuple[str, str, str]]:
     """
     Validate raw_key against Redis cache then DB.
 
-    Returns (tier, source) where source is 'cache' or 'db',
+    Returns (tier, source, key_hash) where source is 'cache' or 'db',
     or None if the key is invalid/revoked.
+    key_hash is included so callers can run rate-limit checks without
+    re-hashing the raw key.
     """
     key_hash = _sha256(raw_key)
     cache_k = _cache_key(key_hash)
@@ -98,7 +100,7 @@ def lookup_key(raw_key: str) -> Optional[tuple[str, str]]:
                 if value.startswith("valid:"):
                     tier = value[6:]
                     _update_last_used(key_hash)
-                    return (tier, "cache")
+                    return (tier, "cache", key_hash)
                 else:  # "revoked"
                     return None
         except Exception as exc:
@@ -121,7 +123,6 @@ def lookup_key(raw_key: str) -> Optional[tuple[str, str]]:
         return None
 
     if row is None or row.status != "active":
-        # Cache the miss/revocation
         if r is not None:
             try:
                 r.set(cache_k, "revoked", ex=60)
@@ -129,7 +130,6 @@ def lookup_key(raw_key: str) -> Optional[tuple[str, str]]:
                 pass
         return None
 
-    # Cache the hit
     if r is not None:
         try:
             r.set(cache_k, f"valid:{row.tier}", ex=300)
@@ -137,4 +137,78 @@ def lookup_key(raw_key: str) -> Optional[tuple[str, str]]:
             pass
 
     _update_last_used(key_hash)
-    return (row.tier, "db")
+    return (row.tier, "db", key_hash)
+
+
+_FREE_SEARCHES_LIMIT = 10
+
+
+def check_and_increment_searches(key_hash: str) -> tuple[bool, int, int]:
+    """
+    Atomically check the Free-tier lifetime search cap and increment if allowed.
+
+    Returns (allowed, searches_used, limit).
+    - allowed=True: the search is permitted; searches_used has been incremented.
+    - allowed=False: cap reached; searches_used reflects current value.
+
+    Uses SELECT ... FOR UPDATE to prevent concurrent requests racing past the cap.
+    Only called for Free-tier keys; Silver+ bypass this check entirely.
+    """
+    try:
+        from ingestion.db import Session
+        from sqlalchemy import text
+        db = Session()
+        try:
+            row = db.execute(
+                text("""
+                    SELECT searches_used
+                    FROM api_keys
+                    WHERE key_hash = :h AND status = 'active'
+                    FOR UPDATE
+                """),
+                {"h": key_hash},
+            ).fetchone()
+
+            if row is None:
+                return (False, 0, _FREE_SEARCHES_LIMIT)
+
+            used = row.searches_used
+            if used >= _FREE_SEARCHES_LIMIT:
+                db.rollback()
+                return (False, used, _FREE_SEARCHES_LIMIT)
+
+            db.execute(
+                text("UPDATE api_keys SET searches_used = searches_used + 1 WHERE key_hash = :h"),
+                {"h": key_hash},
+            )
+            db.commit()
+            return (True, used + 1, _FREE_SEARCHES_LIMIT)
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+    except Exception as exc:
+        log.error(f"[AUTH] check_and_increment_searches failed: {exc}")
+        # Fail open — don't block searches due to DB errors
+        return (True, 0, _FREE_SEARCHES_LIMIT)
+
+
+def get_searches_remaining(key_hash: str) -> tuple[int, int]:
+    """Return (searches_used, limit) for a key. Used for display in API responses."""
+    try:
+        from ingestion.db import Session
+        from sqlalchemy import text
+        db = Session()
+        try:
+            row = db.execute(
+                text("SELECT searches_used FROM api_keys WHERE key_hash = :h LIMIT 1"),
+                {"h": key_hash},
+            ).fetchone()
+            used = row.searches_used if row else 0
+            return (used, _FREE_SEARCHES_LIMIT)
+        finally:
+            db.close()
+    except Exception as exc:
+        log.error(f"[AUTH] get_searches_remaining failed: {exc}")
+        return (0, _FREE_SEARCHES_LIMIT)

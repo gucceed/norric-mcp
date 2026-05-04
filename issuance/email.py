@@ -7,29 +7,56 @@ import os
 log = logging.getLogger(__name__)
 
 _FROM = "Kreditvakt <hej@norric.io>"
-_QUOTA_BY_TIER = {"free": 10, "standard": None, "compliance": None}
+_FRONTEND = "https://kreditvakt.com"
+
+
+def _subject(tier: str) -> str:
+    return "Din Kreditvakt API-nyckel"
 
 
 def _body(raw_key: str, tier: str) -> str:
-    quota = _QUOTA_BY_TIER.get(tier)
-    quota_line = f"Monthly quota:    {quota} calls\n" if quota else ""
-    return (
-        f"Welcome to Norric.\n\n"
-        f"Your Norric MCP API key ({tier} tier) is below.\n\n"
-        f"  {raw_key}\n\n"
-        f"Tier:             {tier.capitalize()}\n"
-        f"{quota_line}"
-        f"\n"
-        f"Use the key in any MCP-compatible client:\n"
-        f"  Authorization: Bearer {raw_key}\n"
-        f"  -- or --\n"
-        f"  X-Norric-Key: {raw_key}\n\n"
-        f"MCP endpoint: https://norric-mcp-production.up.railway.app/mcp\n\n"
-        f"Getting started: https://norric.io/developer-docs.html\n\n"
-        f"Keep this key secret. Do not share it.\n"
-        f"Compromised? Email hej@norric.io immediately.\n\n"
-        f"Norric AB · Malmö, Sweden"
-    )
+    lookup_url = f"{_FRONTEND}/lookup?key={raw_key}"
+
+    sections = [
+        f"Välkommen till Kreditvakt.\n",
+        # Section 1 — Sök direkt
+        "-- Sök direkt ----------------------------------------",
+        f"  {lookup_url}",
+        "",
+        "Klicka på länken ovan för att söka direkt med din nyckel förifylld.",
+        "Sparar du inte länken? Du kan alltid gå till kreditvakt.com/lookup",
+        "och klistra in din nyckel där.",
+        "",
+        # Section 2 — Din API-nyckel
+        "-- Din API-nyckel ------------------------------------",
+        f"  {raw_key}",
+        "",
+        "Spara nyckeln -- den visas inte igen.",
+        "Komprometterad? Mejla hej@norric.io omedelbart.",
+        "",
+    ]
+
+    if tier == "free":
+        sections += [
+            "-- Dina sökningar -----------------------------------",
+            "Du har 10 sökningar i din Free-tier. Använd dem för att se hur",
+            "Kreditvakt bedömer riskerna i din kundportfölj.",
+            "",
+        ]
+
+    sections += [
+        # Section 3 — För utvecklare
+        "-- För utvecklare ------------------------------------",
+        f"  Dokumentation: {_FRONTEND}/docs",
+        f"  MCP-endpoint:  https://norric-mcp-production.up.railway.app/mcp",
+        f"  Authorization: Bearer {raw_key}",
+        "",
+        # Footer
+        "------------------------------------------------------",
+        "Norric AB · Malmö · hej@norric.io",
+    ]
+
+    return "\n".join(sections)
 
 
 def send_key_email(to_email: str, raw_key: str, tier: str) -> None:
@@ -49,7 +76,7 @@ def send_key_email(to_email: str, raw_key: str, tier: str) -> None:
             json={
                 "from": _FROM,
                 "to": [to_email],
-                "subject": "Your Norric MCP API Key",
+                "subject": _subject(tier),
                 "text": _body(raw_key, tier),
             },
             headers={"Authorization": f"Bearer {api_key}"},
@@ -60,4 +87,4 @@ def send_key_email(to_email: str, raw_key: str, tier: str) -> None:
 
     except Exception as exc:
         log.error(f"[KEY_ISSUANCE] Resend delivery failed to {to_email}: {exc}")
-        # Do not raise — key is stored in DB and logged. Ops can resend manually.
+        # Do not raise — key is in DB. Ops can resend manually.

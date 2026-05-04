@@ -81,6 +81,18 @@ app.add_middleware(
 
 # ── GET /api/score/{orgnr} ─────────────────────────────────────────────────────
 
+_FREE_SEARCHES_LIMIT = 10
+_UPGRADE_URL = "mailto:hej@norric.io?subject=Silver-abonnemang%20Kreditvakt&body=Hej,%0A%0AJag%20vill%20teckna%20Silver-abonnemang%20(4%20900%20kr/mån).%0A%0AFöretag:%20%0AOrgnr:%20%0AKontaktperson:%20%0A"
+
+
+def _raw_key_from_request(request: Request) -> str | None:
+    """Extract the raw API key from Authorization or X-Norric-Key header."""
+    auth = request.headers.get("authorization", "")
+    if auth.startswith("Bearer "):
+        return auth.removeprefix("Bearer ").strip()
+    return request.headers.get("x-norric-key", "").strip() or None
+
+
 @app.get("/api/score/{orgnr}", summary="Single company risk score")
 def get_score(orgnr: str, request: Request):
     """
@@ -88,10 +100,40 @@ def get_score(orgnr: str, request: Request):
 
     New fields (v2.1): display_score, band, band_label, band_action.
     internal_score is included for Premium+ only (deprecated alias, sunset 2027-05).
+    Free tier: lifetime cap of 10 searches. Returns 402 when cap reached.
     """
     from scoring.kreditvakt import score_from_db, write_score
     from ingestion.db import Session
 
+    tier = _tier(request)
+
+    # ── Free-tier lifetime cap ────────────────────────────────────────────────
+    if tier == "free":
+        raw_key = _raw_key_from_request(request)
+        if raw_key:
+            import hashlib
+            from core.db_auth import check_and_increment_searches
+            import asyncio
+            key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+            allowed, used, limit = check_and_increment_searches(key_hash)
+            if not allowed:
+                raise HTTPException(
+                    status_code=402,
+                    detail={
+                        "error": "Search limit reached",
+                        "message": f"Du har använt dina {limit} sökningar. Uppgradera till Silver för obegränsade sökningar.",
+                        "searches_used": used,
+                        "searches_limit": limit,
+                        "upgrade_url": _UPGRADE_URL,
+                    },
+                )
+            searches_remaining = limit - used
+        else:
+            searches_remaining = None
+    else:
+        searches_remaining = None
+
+    # ── Score lookup ──────────────────────────────────────────────────────────
     db = Session()
     try:
         result = score_from_db(db, orgnr)
@@ -102,7 +144,11 @@ def get_score(orgnr: str, request: Request):
     finally:
         db.close()
 
-    return _enrich_response(result, request)
+    response = _enrich_response(result, request)
+    if searches_remaining is not None:
+        response["searches_remaining"] = searches_remaining
+        response["searches_limit"] = _FREE_SEARCHES_LIMIT
+    return response
 
 
 # ── POST /api/score/batch ──────────────────────────────────────────────────────

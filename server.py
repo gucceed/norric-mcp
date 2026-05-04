@@ -1326,9 +1326,10 @@ class _NorricAuthMiddleware:
             await resp(scope, receive, send)
             return
 
-        tier, auth_source = result
+        tier, auth_source, key_hash = result
         scope["norric_tier"] = tier
         scope["norric_auth_source"] = auth_source
+        scope["norric_key_hash"] = key_hash
 
         await self.app(scope, receive, send)
 
@@ -1402,18 +1403,21 @@ async def _health_handler(scope, receive, send):
 _mcp_asgi = mcp.http_app()
 
 from issuance.main import app as _issuance_app  # noqa: E402
+from kreditvakt.api import app as _kreditvakt_app  # noqa: E402
 
 _ISSUANCE_PATHS = {"/signup/free", "/checkout", "/webhooks/stripe"}
 
 
 async def _router(scope, receive, send):
-    """Route /health, issuance paths, and everything else to FastMCP."""
+    """Route /health, issuance paths, /api/* (kreditvakt), and everything else to FastMCP."""
     if scope["type"] == "http":
         path = scope.get("path", "")
         if path == "/health":
             await _health_handler(scope, receive, send)
         elif path in _ISSUANCE_PATHS:
             await _issuance_app(scope, receive, send)
+        elif path.startswith("/api/"):
+            await _kreditvakt_app(scope, receive, send)
         else:
             await _mcp_asgi(scope, receive, send)
     else:
