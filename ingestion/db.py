@@ -8,12 +8,17 @@ if not _DATABASE_URL:
     import warnings
     warnings.warn("DATABASE_URL not set — DB operations will fail at runtime")
 
+_url = _DATABASE_URL or "postgresql://localhost/norric"
+# asyncpg dialect uses "timeout" not "connect_timeout"; psycopg2 uses "connect_timeout"
+_is_asyncpg = "asyncpg" in _url
+_connect_args = {"timeout": 10} if _is_asyncpg else {"connect_timeout": 10}
+
 engine = create_engine(
-    _DATABASE_URL or "postgresql://localhost/norric",
+    _url,
     pool_pre_ping=True,
     pool_size=5,
     max_overflow=10,
-    connect_args={"connect_timeout": 10},
+    connect_args=_connect_args,
 )
 
 Session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
