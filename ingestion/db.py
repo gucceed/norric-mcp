@@ -8,17 +8,24 @@ if not _DATABASE_URL:
     import warnings
     warnings.warn("DATABASE_URL not set — DB operations will fail at runtime")
 
-_url = _DATABASE_URL or "postgresql://localhost/norric"
-# asyncpg dialect uses "timeout" not "connect_timeout"; psycopg2 uses "connect_timeout"
-_is_asyncpg = "asyncpg" in _url
-_connect_args = {"timeout": 10} if _is_asyncpg else {"connect_timeout": 10}
+# Ensure we use the sync psycopg2 driver — asyncpg requires async context
+# which is incompatible with this synchronous Session-based code.
+_url = (_DATABASE_URL or "postgresql://localhost/norric").replace(
+    "postgresql+asyncpg://", "postgresql+psycopg2://"
+).replace(
+    "postgres+asyncpg://", "postgresql+psycopg2://"
+).replace(
+    "postgres://", "postgresql+psycopg2://"
+)
+if _url.startswith("postgresql://") and "psycopg2" not in _url:
+    _url = _url.replace("postgresql://", "postgresql+psycopg2://", 1)
 
 engine = create_engine(
     _url,
     pool_pre_ping=True,
     pool_size=5,
     max_overflow=10,
-    connect_args=_connect_args,
+    connect_args={"connect_timeout": 10},
 )
 
 Session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
