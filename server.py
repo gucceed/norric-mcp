@@ -1420,7 +1420,20 @@ async def _router(scope, receive, send):
         await _mcp_asgi(scope, receive, send)
 
 
-app = _NorricAuthMiddleware(_router)
+from starlette.middleware.cors import CORSMiddleware  # noqa: E402
+
+app = CORSMiddleware(
+    _NorricAuthMiddleware(_router),
+    allow_origins=[
+        "https://kreditvakt.com",
+        "https://www.kreditvakt.com",
+        "http://localhost:5173",
+        "http://localhost:4173",
+    ],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
+    allow_credentials=False,
+)
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 
