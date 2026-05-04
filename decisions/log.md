@@ -84,3 +84,22 @@
 **Reversibility:** High — frontend change, Vercel auto-deploys on push.
 
 **Review trigger:** None — aligning frontend to existing backend contract.
+
+---
+
+## 2026-05-04
+
+### Renamed Railway services in project motivated-commitment (589e3b14) for trackability
+
+**What changed:** Four services renamed via Railway GraphQL API (`serviceUpdate` mutation). Redis left unchanged.
+
+| Before | After | Service ID |
+|---|---|---|
+| `daring-adaptation` | `sigvik-beat` | `0c97a57e` |
+| `zoological-enjoyment` | `sigvik-worker` | `82c18a59` |
+| `sigvik-backend` | `sigvik-api` | `76c8e88e` |
+| `Kreditvakt` | `kreditvakt-api` | `79cb30dd` |
+
+**Side effects verified:** Public domain `sigvik-backend-production.up.railway.app` unchanged (Railway preserves generated hostnames on rename). Cross-service reference var auto-renamed `RAILWAY_SERVICE_SIGVIK_BACKEND_URL` → `RAILWAY_SERVICE_SIGVIK_API_URL` with correct value.
+
+**Reversibility:** Easy — rename back via same GraphQL mutation or Railway dashboard.
