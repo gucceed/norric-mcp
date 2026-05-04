@@ -139,8 +139,8 @@ async def checkout(
         payment_method_types=["card"],
         line_items=[{"price": price_id, "quantity": 1}],
         mode="subscription",
-        success_url="https://norric.io/api/success?session_id={CHECKOUT_SESSION_ID}",
-        cancel_url="https://norric.io/api",
+        success_url="https://kreditvakt.com/checkout/success?session_id={CHECKOUT_SESSION_ID}",
+        cancel_url="https://kreditvakt.com/pricing",
         metadata=metadata,
     )
 
