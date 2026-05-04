@@ -23,6 +23,24 @@
 
 ## 2026-05-04
 
+### Set RESEND_API_KEY; Stage 4 email delivery verified end-to-end
+
+**What changed:**
+- `RESEND_API_KEY` added to Railway `norric-mcp` service (sending-only scoped key reused from `Kreditvakt` service in project `motivated-commitment`).
+
+**Verification:** `POST /signup/free` → 201 → email arrived within 5s to temp inbox → from: `hej@norric.io` → key extracted → used on `/mcp` → HTTP 200 with tool result. `last_used_at` updated. Full signup → email → API call funnel live in production.
+
+**Reversibility:** High — rotate key in Resend dashboard.
+
+**Review trigger:** If email deliverability drops below 95% inbox placement, revisit DKIM/DMARC config.
+
+**Missing Railway vars flagged (not fixed):**
+- `REDIS_URL`: not set — auth cache falls back to DB on every request (functional, ~10ms overhead per auth call)
+- `BOLAGSVERKET_CLIENT_ID` / `BOLAGSVERKET_CLIENT_SECRET`: not set — Bolagsverket-dependent tools will error
+- `STRIPE_SECRET_KEY`: not set — `/checkout` Stripe session creation will fail
+
+---
+
 ### Vendor consolidation: email transport confirmed Resend-only
 
 **Finding:** `issuance/email.py` already used Resend exclusively — `SENDGRID_API_KEY` appeared only in a stale docstring comment in `issuance/main.py`. No SendGrid SDK or HTTP calls existed anywhere in the codebase.
