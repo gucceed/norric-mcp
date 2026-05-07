@@ -1,6 +1,6 @@
 # Norric Intelligence MCP Server
 
-[![MCP](https://img.shields.io/badge/MCP-Streamable_HTTP-blue)](https://norric-mcp-production.up.railway.app/mcp)
+[![MCP](https://img.shields.io/badge/MCP-Streamable_HTTP-blue)](https://mcp.norric.io/mcp)
 
 Sweden's B2B intelligence infrastructure — exposed as a single MCP server.
 
@@ -42,7 +42,7 @@ Annual plans: Standard 29,000 SEK/year · Compliance 99,000 SEK/year
 
 ### Claude Code (CLI)
 ```bash
-claude mcp add norric https://norric-mcp-production.up.railway.app/mcp \
+claude mcp add norric https://mcp.norric.io/mcp \
   --header "Authorization: Bearer nrc_your_api_key"
 ```
 
@@ -51,7 +51,7 @@ claude mcp add norric https://norric-mcp-production.up.railway.app/mcp \
 {
   "mcpServers": {
     "norric": {
-      "url": "https://norric-mcp-production.up.railway.app/mcp",
+      "url": "https://mcp.norric.io/mcp",
       "transport": "streamable-http",
       "headers": {
         "Authorization": "Bearer nrc_your_api_key"
@@ -66,7 +66,7 @@ claude mcp add norric https://norric-mcp-production.up.railway.app/mcp \
 {
   "mcpServers": {
     "norric": {
-      "url": "https://norric-mcp-production.up.railway.app/mcp",
+      "url": "https://mcp.norric.io/mcp",
       "headers": {
         "Authorization": "Bearer nrc_your_api_key"
       }
@@ -176,14 +176,14 @@ MCP requires initializing a session before calling tools:
 ```bash
 # Step 1: Initialize (no auth required)
 SESSION=$(curl -si \
-  -X POST https://norric-mcp-production.up.railway.app/mcp \
+  -X POST https://mcp.norric.io/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}' \
   | grep -i "mcp-session-id" | awk '{print $2}' | tr -d '\r')
 
 # Step 2: Call a tool (auth required)
-curl -s -X POST https://norric-mcp-production.up.railway.app/mcp \
+curl -s -X POST https://mcp.norric.io/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -H "Authorization: Bearer nrc_your_api_key" \

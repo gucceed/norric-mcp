@@ -53,7 +53,7 @@ https://norric.io/api
 ## Endpoint
 
 ```
-https://norric-mcp-production.up.railway.app/mcp
+https://mcp.norric.io/mcp
 ```
 
 ## Authentication
@@ -69,14 +69,14 @@ X-Norric-Key: nrc_your_api_key
 ```bash
 # Step 1: Initialize session (no auth required for this step)
 SESSION=$(curl -si \
-  -X POST https://norric-mcp-production.up.railway.app/mcp \
+  -X POST https://mcp.norric.io/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}' \
   | grep -i "mcp-session-id" | awk '{print $2}' | tr -d '\r')
 
 # Step 2: Call a tool with your API key
-curl -s -X POST https://norric-mcp-production.up.railway.app/mcp \
+curl -s -X POST https://mcp.norric.io/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -H "Authorization: Bearer nrc_your_api_key" \
@@ -87,7 +87,7 @@ curl -s -X POST https://norric-mcp-production.up.railway.app/mcp \
 ## Add to Claude Code
 
 ```bash
-claude mcp add norric https://norric-mcp-production.up.railway.app/mcp \
+claude mcp add norric https://mcp.norric.io/mcp \
   --header "Authorization: Bearer nrc_your_api_key"
 ```
 

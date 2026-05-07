@@ -5,7 +5,7 @@
 procurement signals from Swedish government registries — for credit,
 real estate, and public sector AI workflows.
 **Category:** Finance & Business Intelligence
-**MCP endpoint:** https://norric-mcp-production.up.railway.app/mcp
+**MCP endpoint:** https://mcp.norric.io/mcp
 **Auth type:** Bearer token
 **Protocol version:** 2024-11-05
 **Transport:** Streamable HTTP
