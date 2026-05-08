@@ -118,3 +118,51 @@
 **Side effects verified:** Public domain `sigvik-backend-production.up.railway.app` unchanged (Railway preserves generated hostnames on rename). Cross-service reference var auto-renamed `RAILWAY_SERVICE_SIGVIK_BACKEND_URL` → `RAILWAY_SERVICE_SIGVIK_API_URL` with correct value.
 
 **Reversibility:** Easy — rename back via same GraphQL mutation or Railway dashboard.
+
+---
+
+## 2026-05-08
+
+### mcp.norric.io SSL cert provisioned — Railway custom domain verified
+
+**What happened:** Railway custom domain `mcp.norric.io` (ID `d37ef400-f6b0-4609-a0e6-e2aa02a13473`) was
+stuck at `CN=*.up.railway.app` for 12+ hours. Root cause: TXT verification record missing at
+`_railway-verify.mcp.norric.io`. Railway requires this before it will route the domain and issue
+a cert via ACME HTTP-01.
+
+**What changed:**
+- Added TXT record `_railway-verify.mcp.norric.io` = `railway-verify=dec9802d1ca564a24d23505d75562502fac16036ab1fb4e663bbac9fd6fc33fe` at DNS provider.
+- Railway verified ownership and issued cert: `CN=mcp.norric.io` from Let's Encrypt (R13), valid 2026-05-07 → 2026-08-05.
+- Updated all `norric-mcp-production.up.railway.app/mcp` references → `mcp.norric.io/mcp` across `README.md`, `registry/mcpso_listing.md`, `registry/anthropic_connector_submission.md`.
+
+**Reversibility:** DNS TXT record can be removed at any time. Railway cert auto-renews.
+
+---
+
+### Multi-registry submission system built and first submission executed
+
+**What changed — new files:**
+- `registry/servers.yaml` — source of truth for all Norric MCP server entries
+- `registry/submit.py` — CLI: `python -m registry.submit <server_id>`
+- `registry/generators/official_mcp_registry.py` — emits `server.json` (MCP Registry schema 2025-12-11)
+- `registry/generators/github_mcp_registry.py` — forks punkpeye/awesome-mcp-servers, opens PR via `gh`
+- `registry/generators/mcp_so.py` — emits mcp.so comment payload
+- `registry/generators/pulsemcp.py` — emits PulseMCP form payload
+- `registry/submissions.json` — per-server per-registry ledger (timestamp, PR URL, status)
+- `registry/anthropic-partnership.md` — documents Anthropic connector directory as partnership track (not automated); revisit at 10+ paying users
+- `registry/README.md` — how to add a new server in 10 minutes
+
+**First run — norric-mcp submission results:**
+
+| Registry | Status |
+|---|---|
+| Official MCP Registry | `pending_manual` — `server.json` generated at `registry/norric-mcp_server.json`; run `mcp-publisher publish` to complete |
+| punkpeye/awesome-mcp-servers | **PR opened**: https://github.com/punkpeye/awesome-mcp-servers/pull/6042 |
+| mcp.so | Payload printed — paste at github.com/chatmcp/mcpso/issues/1 |
+| PulseMCP | Payload printed — submit at pulsemcp.com/submit |
+
+**Idempotency:** Re-running `python -m registry.submit norric-mcp` skips already-submitted registries
+and prints existing PR URLs from `submissions.json`.
+
+**Adding future servers (Sigvik, Kreditvakt, SIGNAL, Vigil):** Copy a YAML entry in `servers.yaml`,
+run the CLI, paste two form payloads. Target: 10 minutes per server.

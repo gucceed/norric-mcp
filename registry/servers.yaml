@@ -1,0 +1,68 @@
+servers:
+  - id: norric-mcp
+    name: Norric Swedish Business Intelligence
+    title: Norric
+    description_short: >-
+      Real-time insolvency risk, enforcement history, BRF financial health,
+      and procurement signals from five Swedish government registries.
+    description_long: >-
+      Norric is Sweden's primary source for B2B entity intelligence, exposed as
+      a single MCP server. Data is drawn directly from Bolagsverket (company
+      registrations, bankruptcy filings), Skatteverket (tax enforcement, F-skatt
+      status), Kronofogden (payment orders, enforcement actions), Boverket (BRF
+      regulatory data), and Lantmäteriet (land registry).
+
+      Primary use cases: bank credit AI agents, leasing underwriting, construction
+      contractor prospecting, public sector procurement intelligence, real estate
+      due diligence. No equivalent MCP server exists for Nordic market data.
+    categories:
+      - Finance & Business Intelligence
+      - Business & Finance
+    tags:
+      - sweden
+      - nordic
+      - insolvency
+      - credit-risk
+      - procurement
+      - real-estate
+      - brf
+      - bolagsverket
+      - skatteverket
+      - kronofogden
+    github_url: https://github.com/gucceed/norric-mcp
+    server_url: https://mcp.norric.io/mcp
+    homepage: https://norric.io
+    contact_email: hej@norric.io
+    company: Norric AB
+    company_location: Malmö, Sweden
+    auth_type: bearer
+    transport: streamable-http
+    protocol_version: "2024-11-05"
+    license: proprietary
+    version: "1.0.0"
+    status: live
+    free_tier_tools:
+      - norric_status_v1
+    paid_tier_tools:
+      - kreditvakt_score_company_v1
+      - kreditvakt_batch_score_v1
+      - kreditvakt_debt_signals_v1
+      - kreditvakt_bankruptcy_status_v1
+      - vigil_lifecycle_stage_v1
+      - vigil_new_companies_v1
+      - vigil_ownership_velocity_v1
+      - signal_score_municipality_v1
+      - signal_weekly_call_list_v1
+      - signal_municipality_briefing_v1
+      - signal_contract_expiry_alerts_v1
+      - signal_sweden_pulse_v1
+      - sigvik_score_brf_v1
+      - sigvik_brf_avgift_v1
+      - sigvik_brf_flags_v1
+      - norric_company_profile_v1
+      - norric_explain_score_v1
+      - norric_data_freshness_v1
+    tool_count: 19
+    quick_start: |
+      claude mcp add norric https://mcp.norric.io/mcp \
+        --header "Authorization: Bearer nrk_your_api_key"

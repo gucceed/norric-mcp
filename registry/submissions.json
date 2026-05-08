@@ -1,0 +1,23 @@
+{
+  "norric-mcp": {
+    "official_mcp_registry": {
+      "status": "pending_manual",
+      "note": "server.json written to /private/tmp/norric-mcp-repo/registry/norric-mcp_server.json. Install mcp-publisher and run: mcp-publisher publish --file /private/tmp/norric-mcp-repo/registry/norric-mcp_server.json",
+      "server_json_path": "/private/tmp/norric-mcp-repo/registry/norric-mcp_server.json",
+      "submitted_at": null
+    },
+    "github_mcp_registry": {
+      "status": "submitted",
+      "pr_url": "https://github.com/punkpeye/awesome-mcp-servers/pull/6042",
+      "submitted_at": "2026-05-08T05:02:59.000428+00:00"
+    },
+    "mcp_so": {
+      "status": "payload_printed",
+      "submitted_at": "2026-05-08T05:02:19.286897+00:00"
+    },
+    "pulsemcp": {
+      "status": "payload_printed",
+      "submitted_at": "2026-05-08T05:02:19.286946+00:00"
+    }
+  }
+}
