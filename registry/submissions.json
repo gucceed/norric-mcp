@@ -1,23 +1,26 @@
 {
   "norric-mcp": {
     "official_mcp_registry": {
-      "status": "pending_manual",
-      "note": "server.json written to /private/tmp/norric-mcp-repo/registry/norric-mcp_server.json. Install mcp-publisher and run: mcp-publisher publish --file /private/tmp/norric-mcp-repo/registry/norric-mcp_server.json",
-      "server_json_path": "/private/tmp/norric-mcp-repo/registry/norric-mcp_server.json",
-      "submitted_at": null
+      "status": "active",
+      "registry_name": "io.github.gucceed/norric-mcp",
+      "registry_url": "https://registry.modelcontextprotocol.io/v0.1/servers/io.github.gucceed/norric-mcp/versions/1.0.0",
+      "submitted_at": "2026-05-08T05:31:59+00:00",
+      "published_at": "2026-05-08T05:31:59+00:00"
     },
     "github_mcp_registry": {
       "status": "submitted",
       "pr_url": "https://github.com/punkpeye/awesome-mcp-servers/pull/6042",
-      "submitted_at": "2026-05-08T05:02:59.000428+00:00"
+      "submitted_at": "2026-05-08T05:02:19+00:00"
     },
     "mcp_so": {
-      "status": "payload_printed",
-      "submitted_at": "2026-05-08T05:02:19.286897+00:00"
+      "status": "submitted",
+      "comment_url": "https://github.com/chatmcp/mcpso/issues/1#issuecomment-4403644371",
+      "submitted_at": "2026-05-08T05:33:00+00:00"
     },
     "pulsemcp": {
-      "status": "payload_printed",
-      "submitted_at": "2026-05-08T05:02:19.286946+00:00"
+      "status": "payload_ready",
+      "note": "Manual form submission required at pulsemcp.com/submit",
+      "submitted_at": null
     }
   }
 }

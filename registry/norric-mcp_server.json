@@ -1,38 +1,19 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.norric.io/norric-mcp",
+  "name": "io.github.gucceed/norric-mcp",
   "title": "Norric",
-  "description": "Real-time insolvency risk, enforcement history, BRF financial health, and procurement signals from five Swedish government registries.",
+  "description": "Swedish B2B intelligence: insolvency risk, BRF health & procurement signals from govt registries.",
   "version": "1.0.0",
-  "homepage": "https://norric.io",
+  "websiteUrl": "https://norric.io",
   "repository": {
-    "type": "git",
-    "url": "https://github.com/gucceed/norric-mcp"
+    "url": "https://github.com/gucceed/norric-mcp",
+    "source": "github",
+    "id": "1209717788"
   },
   "remotes": [
     {
       "type": "streamable-http",
-      "url": "https://mcp.norric.io/mcp",
-      "authorization": {
-        "type": "Bearer",
-        "description": "Get a trial key at norric.io/api. Pass as: Authorization: Bearer nrk_your_api_key"
-      }
+      "url": "https://mcp.norric.io/mcp"
     }
-  ],
-  "categories": [
-    "Finance & Business Intelligence",
-    "Business & Finance"
-  ],
-  "tags": [
-    "sweden",
-    "nordic",
-    "insolvency",
-    "credit-risk",
-    "procurement",
-    "real-estate",
-    "brf",
-    "bolagsverket",
-    "skatteverket",
-    "kronofogden"
   ]
 }
