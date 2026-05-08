@@ -155,25 +155,58 @@ def _raw_key_from_request(request: Request) -> str | None:
 _IP_RL_WINDOW = 60   # seconds
 _IP_RL_MAX    = 10   # requests per window
 
+_UPSTASH_URL   = os.environ.get("UPSTASH_REDIS_REST_URL", "")
+_UPSTASH_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
+
 
 def _check_ip_rate_limit(client_ip: str) -> bool:
     """
-    Sliding-window IP rate limit using Redis INCR + EXPIRE.
+    Sliding-window IP rate limit using Upstash Redis REST API (INCR + EXPIRE).
     Returns True if the request should be blocked (limit exceeded).
-    Falls through (returns False) when Redis is unavailable.
+    Falls through (returns False) when Upstash is not configured or unavailable.
     """
-    from core.db_auth import _get_redis  # reuse shared Redis client
-    r = _get_redis()
-    if r is None:
-        return False  # Redis unavailable — fail open rather than block all anon traffic
+    if not _UPSTASH_URL or not _UPSTASH_TOKEN:
+        # Try fallback to redis:// client
+        from core.db_auth import _get_redis
+        r = _get_redis()
+        if r is None:
+            return False
+        try:
+            rl_key = f"kreditvakt:rl:{hashlib.sha256(client_ip.encode()).hexdigest()[:16]}"
+            count = r.incr(rl_key)
+            if count == 1:
+                r.expire(rl_key, _IP_RL_WINDOW)
+            return count > _IP_RL_MAX
+        except Exception as exc:
+            log.warning("[RL] Redis rate-limit check failed (%s) — allowing request", exc)
+            return False
+
     try:
+        import urllib.request as _urlreq
         rl_key = f"kreditvakt:rl:{hashlib.sha256(client_ip.encode()).hexdigest()[:16]}"
-        count = r.incr(rl_key)
+        headers = {"Authorization": f"Bearer {_UPSTASH_TOKEN}", "Content-Type": "application/json"}
+
+        # INCR
+        req = _urlreq.Request(
+            f"{_UPSTASH_URL}/incr/{rl_key}",
+            method="POST",
+            headers=headers,
+        )
+        with _urlreq.urlopen(req, timeout=1) as resp:
+            count = int(__import__("json").loads(resp.read())["result"])
+
+        # SET EXPIRE on first hit
         if count == 1:
-            r.expire(rl_key, _IP_RL_WINDOW)
+            req2 = _urlreq.Request(
+                f"{_UPSTASH_URL}/expire/{rl_key}/{_IP_RL_WINDOW}",
+                method="POST",
+                headers=headers,
+            )
+            _urlreq.urlopen(req2, timeout=1).close()
+
         return count > _IP_RL_MAX
     except Exception as exc:
-        log.warning("[RL] Redis rate-limit check failed (%s) — allowing request", exc)
+        log.warning("[RL] Upstash rate-limit check failed (%s) — allowing request", exc)
         return False
 
 
