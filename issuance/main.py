@@ -84,6 +84,7 @@ def _store_key(key_hash: str, tier: str, email: str, org_nr: str | None) -> None
 
 _FREE_ORG_CAP = 10
 _UPGRADE_URL = "mailto:hej@norric.io?subject=Silver-abonnemang%20Kreditvakt&body=Hej,%0A%0AJag%20vill%20teckna%20Silver-abonnemang%20(4%20900%20kr/mån).%0A%0AFöretag:%20%0AOrgnr:%20%0AKontaktperson:%20%0A"
+_503_DETAIL = "Tillfälligt fel — försök igen om en stund eller kontakta hej@norric.io."
 
 
 def _free_org_exists(org_nr: str) -> bool:
@@ -102,8 +103,9 @@ def _free_org_exists(org_nr: str) -> bool:
 
 def _free_org_key_count(org_nr: str) -> tuple[int, str | None]:
     """Return (count, org_name) of active free keys for this org_nr.
-    org_name comes from norric_entities if available."""
+    org_name comes from norric_entities if available (best-effort, not required)."""
     from ingestion.db import Session
+    from sqlalchemy.exc import OperationalError, ProgrammingError
     db = Session()
     try:
         count_row = db.execute(
@@ -112,20 +114,32 @@ def _free_org_key_count(org_nr: str) -> tuple[int, str | None]:
         ).fetchone()
         count = count_row[0] if count_row else 0
 
-        name_row = db.execute(
-            text("SELECT name FROM norric_entities WHERE orgnr = :o LIMIT 1"),
-            {"o": org_nr},
-        ).fetchone()
-        org_name = name_row.name if name_row else None
+        try:
+            name_row = db.execute(
+                text("SELECT name FROM norric_entities WHERE orgnr = :o LIMIT 1"),
+                {"o": org_nr},
+            ).fetchone()
+            org_name = name_row.name if name_row else None
+        except (OperationalError, ProgrammingError, Exception):
+            org_name = None  # ingestion not yet run — non-fatal
 
         return (count, org_name)
+    except Exception as exc:
+        log.error("[SIGNUP] org key count query failed (orgnr=%s): %s", org_nr, exc, exc_info=True)
+        raise HTTPException(status_code=503, detail=_503_DETAIL)
     finally:
         db.close()
 
 
+_ORGNR_TABLE_UNAVAILABLE = ""  # sentinel: table missing pre-ingestion, allow signup
+
+
 def _validate_orgnr_exists(org_nr: str) -> str | None:
-    """Check norric_entities for the org. Returns org name if found, None if not found."""
+    """Check norric_entities for the org. Returns org name if found, None if explicitly not
+    found in an available table, or _ORGNR_TABLE_UNAVAILABLE ("") if the table doesn't exist
+    yet (pre-ingestion) — callers must treat the empty-string case as non-blocking."""
     from ingestion.db import Session
+    from sqlalchemy.exc import OperationalError, ProgrammingError
     db = Session()
     try:
         row = db.execute(
@@ -133,6 +147,8 @@ def _validate_orgnr_exists(org_nr: str) -> str | None:
             {"o": org_nr},
         ).fetchone()
         return row.name if row else None
+    except (OperationalError, ProgrammingError, Exception):
+        return _ORGNR_TABLE_UNAVAILABLE  # table doesn't exist yet — skip validation
     finally:
         db.close()
 
@@ -243,9 +259,10 @@ class FreeSignupRequest(BaseModel):
 
 @app.post("/signup/free", status_code=201)
 async def signup_free(body: FreeSignupRequest):
-    # Validate org exists in Bolagsverket bulk data
+    # Validate org exists in Bolagsverket bulk data (skipped pre-ingestion)
     org_name = _validate_orgnr_exists(body.org_nr)
     if org_name is None:
+        # None = table exists but org not found. "" = table unavailable (pre-ingestion) — allow through.
         raise HTTPException(
             status_code=400,
             detail=(
