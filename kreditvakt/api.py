@@ -728,6 +728,32 @@ def health():
     }
 
 
+# ── GET /api/env-check  (temporary diagnostic — remove after V3 verified) ──────
+
+@app.get("/api/env-check")
+def env_check():
+    """Shape-only diagnostic — confirms env vars are present and well-formed.
+    Never logs or returns the values themselves."""
+    import re as _re
+    url   = os.environ.get("UPSTASH_REDIS_REST_URL", "")
+    token = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
+    return {
+        "url_present":            bool(url),
+        "url_length":             len(url),
+        "url_starts_with_https":  url.startswith("https://"),
+        "url_has_upstash_io":     "upstash.io" in url,
+        "url_has_whitespace":     bool(_re.search(r"\s", url)),
+        "url_has_quotes":         bool(_re.search(r"[\"']", url)),
+        "token_present":          bool(token),
+        "token_length":           len(token),
+        "token_has_whitespace":   bool(_re.search(r"\s", token)),
+        "token_has_quotes":       bool(_re.search(r"[\"']", token)),
+        "railway_environment":    os.environ.get("RAILWAY_ENVIRONMENT"),
+        "railway_service":        os.environ.get("RAILWAY_SERVICE_NAME"),
+        "deploy_sha_prefix":      _DEPLOY_SHA[:8] if _DEPLOY_SHA != "unknown" else "unknown",
+    }
+
+
 # ── Response helpers ───────────────────────────────────────────────────────────
 
 def _enrich_response(result: dict, request: Request) -> dict:
