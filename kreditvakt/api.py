@@ -152,6 +152,31 @@ def _raw_key_from_request(request: Request) -> str | None:
     return request.headers.get("x-norric-key", "").strip() or None
 
 
+_IP_RL_WINDOW = 60   # seconds
+_IP_RL_MAX    = 10   # requests per window
+
+
+def _check_ip_rate_limit(client_ip: str) -> bool:
+    """
+    Sliding-window IP rate limit using Redis INCR + EXPIRE.
+    Returns True if the request should be blocked (limit exceeded).
+    Falls through (returns False) when Redis is unavailable.
+    """
+    from core.db_auth import _get_redis  # reuse shared Redis client
+    r = _get_redis()
+    if r is None:
+        return False  # Redis unavailable — fail open rather than block all anon traffic
+    try:
+        rl_key = f"kreditvakt:rl:{hashlib.sha256(client_ip.encode()).hexdigest()[:16]}"
+        count = r.incr(rl_key)
+        if count == 1:
+            r.expire(rl_key, _IP_RL_WINDOW)
+        return count > _IP_RL_MAX
+    except Exception as exc:
+        log.warning("[RL] Redis rate-limit check failed (%s) — allowing request", exc)
+        return False
+
+
 @app.get("/api/score/{orgnr}", summary="Single company risk score")
 def get_score(orgnr: str, request: Request):
     """
@@ -196,6 +221,26 @@ def get_score(orgnr: str, request: Request):
             status_code=http_status(ErrCode.UPSTREAM_DEGRADED),
             detail={"error_code": ErrCode.UPSTREAM_DEGRADED, "message": customer_message(ErrCode.UPSTREAM_DEGRADED)},
         )
+
+    # ── IP rate limiting for keyless free-tier (10 req/min) ──────────────────
+    if tier == "free" and not _raw_key_from_request(request):
+        client_ip = (
+            request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+            or request.headers.get("x-real-ip", "")
+            or getattr(request.client, "host", "unknown")
+        )
+        if _check_ip_rate_limit(client_ip):
+            _structured_log(
+                orgnr_raw=orgnr_normalized, tier=tier,
+                latency_ms=(time.monotonic() - t0) * 1000,
+                status_code=429,
+                error_code=ErrCode.UPSTREAM_RATE_LIMIT,
+                error_message=f"IP rate limit exceeded: {client_ip}",
+            )
+            raise HTTPException(
+                status_code=429,
+                detail={"error_code": ErrCode.UPSTREAM_RATE_LIMIT, "message": customer_message(ErrCode.UPSTREAM_RATE_LIMIT)},
+            )
 
     # ── Free-tier quota (key-based when key present, else anonymous) ──────────
     searches_remaining: Optional[int] = None
