@@ -155,21 +155,24 @@ def _raw_key_from_request(request: Request) -> str | None:
 _IP_RL_WINDOW = 60   # seconds
 _IP_RL_MAX    = 10   # requests per window
 
-_UPSTASH_URL   = os.environ.get("UPSTASH_REDIS_REST_URL", "")
-_UPSTASH_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
-
 
 def _check_ip_rate_limit(client_ip: str) -> bool:
     """
     Sliding-window IP rate limit using Upstash Redis REST API (INCR + EXPIRE).
     Returns True if the request should be blocked (limit exceeded).
+    Reads env vars at call time (not import time) so Railway variable changes
+    take effect without a code redeploy.
     Falls through (returns False) when Upstash is not configured or unavailable.
     """
-    if not _UPSTASH_URL or not _UPSTASH_TOKEN:
+    upstash_url   = os.environ.get("UPSTASH_REDIS_REST_URL", "")
+    upstash_token = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
+
+    if not upstash_url or not upstash_token:
         # Try fallback to redis:// client
         from core.db_auth import _get_redis
         r = _get_redis()
         if r is None:
+            log.debug("[RL] No Upstash or Redis configured — rate limit disabled")
             return False
         try:
             rl_key = f"kreditvakt:rl:{hashlib.sha256(client_ip.encode()).hexdigest()[:16]}"
@@ -184,11 +187,11 @@ def _check_ip_rate_limit(client_ip: str) -> bool:
     try:
         import urllib.request as _urlreq
         rl_key = f"kreditvakt:rl:{hashlib.sha256(client_ip.encode()).hexdigest()[:16]}"
-        headers = {"Authorization": f"Bearer {_UPSTASH_TOKEN}", "Content-Type": "application/json"}
+        headers = {"Authorization": f"Bearer {upstash_token}", "Content-Type": "application/json"}
 
         # INCR
         req = _urlreq.Request(
-            f"{_UPSTASH_URL}/incr/{rl_key}",
+            f"{upstash_url}/incr/{rl_key}",
             method="POST",
             headers=headers,
         )
@@ -198,7 +201,7 @@ def _check_ip_rate_limit(client_ip: str) -> bool:
         # SET EXPIRE on first hit
         if count == 1:
             req2 = _urlreq.Request(
-                f"{_UPSTASH_URL}/expire/{rl_key}/{_IP_RL_WINDOW}",
+                f"{upstash_url}/expire/{rl_key}/{_IP_RL_WINDOW}",
                 method="POST",
                 headers=headers,
             )
