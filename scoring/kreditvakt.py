@@ -58,25 +58,69 @@ def score_from_db(db: Session, orgnr: str) -> dict:
     """
     Score a company from live T1 ingestion tables.
 
-    Returns the full scoring payload or raises RuntimeError if DB unavailable.
-    When no signals are found (company not yet ingested), returns score_source='mock'
-    via the deterministic fallback.
+    Returns the full scoring payload.
+    Falls back to deterministic mock when:
+      - T1 tables are absent (schema not yet migrated) → logs SCHEMA_MISSING
+      - No live signals found for this orgnr → normal path, score_source='mock'
     """
     orgnr_clean = orgnr.replace("-", "").replace(" ", "")
     if len(orgnr_clean) == 10:
         orgnr = f"{orgnr_clean[:6]}-{orgnr_clean[6:]}"
 
-    # ── Source 1 & 2: Skatteverket ─────────────────────────────────────────────
-    tax_row = db.execute(
-        text("""
-            SELECT amount_sek, last_seen_at, is_active
-            FROM norric_tax_signals
-            WHERE orgnr = :orgnr AND is_active = true
-            ORDER BY last_seen_at DESC
-            LIMIT 1
-        """),
-        {"orgnr": orgnr},
-    ).fetchone()
+    # ── T1 signal queries — guarded against missing tables ────────────────────
+    try:
+        # Source 1 & 2: Skatteverket
+        tax_row = db.execute(
+            text("""
+                SELECT amount_sek, last_seen_at, is_active
+                FROM norric_tax_signals
+                WHERE orgnr = :orgnr AND is_active = true
+                ORDER BY last_seen_at DESC
+                LIMIT 1
+            """),
+            {"orgnr": orgnr},
+        ).fetchone()
+
+        # Source 3 & 4: Kronofogden
+        kron_row = db.execute(
+            text("""
+                SELECT
+                    COUNT(*)                                         AS case_count,
+                    MAX(filed_at)                                    AS latest_filed,
+                    now()::date - MAX(filed_at)                      AS days_since_last,
+                    SUM(claim_amount_sek) FILTER (WHERE is_active)   AS total_claim_sek,
+                    COUNT(*) FILTER (WHERE filed_at >= now()::date - 180) AS cases_last_6mo
+                FROM norric_payment_signals
+                WHERE orgnr = :orgnr
+            """),
+            {"orgnr": orgnr},
+        ).fetchone()
+
+        # Source 5: Bolagsverket konkursansökan
+        konkurs_row = db.execute(
+            text("""
+                SELECT 1 FROM norric_payment_signals
+                WHERE orgnr = :orgnr
+                  AND raw_data->>'signal_type' = 'konkurs'
+                  AND filed_at >= now()::date - 365
+                LIMIT 1
+            """),
+            {"orgnr": orgnr},
+        ).fetchone()
+
+    except Exception as exc:
+        # T1 tables absent (SCHEMA_MISSING) or DB transient error.
+        # Roll back the aborted transaction so write_score() can still proceed.
+        log.warning(
+            "[%s] T1 signal tables unavailable (%s: %s) — using mock fallback",
+            orgnr, type(exc).__name__, exc,
+            extra={"error_code": "SCHEMA_MISSING"},
+        )
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return _mock_fallback(orgnr)
 
     skuld_sek = 0
     skatteverket_flag = False
@@ -86,21 +130,6 @@ def score_from_db(db: Session, orgnr: str) -> dict:
         skatteverket_flag = True
         skuld_sek = int(tax_row.amount_sek or 0)
         skatteverket_last_seen = tax_row.last_seen_at
-
-    # ── Source 3 & 4: Kronofogden ──────────────────────────────────────────────
-    kron_row = db.execute(
-        text("""
-            SELECT
-                COUNT(*)                                         AS case_count,
-                MAX(filed_at)                                    AS latest_filed,
-                now()::date - MAX(filed_at)                      AS days_since_last,
-                SUM(claim_amount_sek) FILTER (WHERE is_active)   AS total_claim_sek,
-                COUNT(*) FILTER (WHERE filed_at >= now()::date - 180) AS cases_last_6mo
-            FROM norric_payment_signals
-            WHERE orgnr = :orgnr
-        """),
-        {"orgnr": orgnr},
-    ).fetchone()
 
     kronofogden_count_6mo = 0
     kronofogden_recency_days: Optional[int] = None
@@ -114,17 +143,6 @@ def score_from_db(db: Session, orgnr: str) -> dict:
         if kron_row.latest_filed:
             kronofogden_latest_date = str(kron_row.latest_filed)
 
-    # ── Source 5: Bolagsverket konkursansökan ──────────────────────────────────
-    konkurs_row = db.execute(
-        text("""
-            SELECT 1 FROM norric_payment_signals
-            WHERE orgnr = :orgnr
-              AND raw_data->>'signal_type' = 'konkurs'
-              AND filed_at >= now()::date - 365
-            LIMIT 1
-        """),
-        {"orgnr": orgnr},
-    ).fetchone()
     bolagsverket_petition = konkurs_row is not None
 
     # ── Check if we have any live data ────────────────────────────────────────

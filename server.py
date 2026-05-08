@@ -1261,6 +1261,12 @@ _VALID_KEYS = set(k.strip() for k in _NORRIC_API_KEYS_ENV.split(",") if k.strip(
 
 _OPEN_PATHS = {"/health", "/signup/free", "/checkout", "/webhooks/stripe"}
 
+# Scoring paths: auth is OPTIONAL.
+# No key → free-tier anonymous (rate-limited by IP in kreditvakt/api.py).
+# Valid key → tier resolved; Silver+ bypass IP limit and use per-key quota.
+# Invalid key → 401 (explicit rejection of bad credentials).
+_OPTIONAL_AUTH_PREFIX = "/api/score/"
+
 
 class _NorricAuthMiddleware:
     """
@@ -1272,8 +1278,8 @@ class _NorricAuthMiddleware:
       3. DB lookup    — api_keys table, status='active'
 
     Open paths bypass auth: /health, /signup/free, /checkout, /webhooks/stripe.
-    Open mode (no NORRIC_API_KEYS and DB unreachable) is deliberately not
-    supported in production — fail closed.
+    Optional-auth paths (/api/score/): no key → free tier; invalid key → 401.
+    All other paths: require valid key (fail closed).
     """
 
     def __init__(self, asgi_app):
@@ -1286,15 +1292,24 @@ class _NorricAuthMiddleware:
 
         path = scope.get("path", "")
 
-        # Public routes — no auth required
+        # Fully public — no auth needed
         if path in _OPEN_PATHS:
             await self.app(scope, receive, send)
             return
 
-        # Extract Bearer token
-        headers = dict(scope.get("headers", []))
+        headers  = dict(scope.get("headers", []))
         raw_auth = headers.get(b"authorization", b"").decode()
-        if not raw_auth.startswith("Bearer "):
+        has_key  = raw_auth.startswith("Bearer ")
+
+        # Optional-auth scoring paths: no key → anonymous free tier
+        if path.startswith(_OPTIONAL_AUTH_PREFIX) and not has_key:
+            scope["norric_tier"]        = "free"
+            scope["norric_auth_source"] = "anonymous"
+            await self.app(scope, receive, send)
+            return
+
+        # All other paths (and scoring with a key): require valid token
+        if not has_key:
             from starlette.responses import JSONResponse
             resp = JSONResponse(
                 {"error": "Missing API key. Get yours at norric.io/api-keys"},
@@ -1307,7 +1322,7 @@ class _NorricAuthMiddleware:
 
         # ── 1. Env var escape hatch (fast path, no DB/Redis) ──────────────────
         if key in _VALID_KEYS:
-            scope["norric_tier"] = "internal"
+            scope["norric_tier"]        = "internal"
             scope["norric_auth_source"] = "env"
             await self.app(scope, receive, send)
             return
@@ -1327,9 +1342,9 @@ class _NorricAuthMiddleware:
             return
 
         tier, auth_source, key_hash = result
-        scope["norric_tier"] = tier
+        scope["norric_tier"]        = tier
         scope["norric_auth_source"] = auth_source
-        scope["norric_key_hash"] = key_hash
+        scope["norric_key_hash"]    = key_hash
 
         await self.app(scope, receive, send)
 

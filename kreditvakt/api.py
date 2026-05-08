@@ -28,8 +28,13 @@ Deprecated fields (sunset 2027-05):
     risk_band        — use band instead
 """
 
-import os
+import hashlib
+import json
 import logging
+import os
+import re
+import time
+import uuid
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -38,7 +43,61 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import text
 
+from kreditvakt.errors import ErrCode, customer_message, http_status, log_severity
+from kreditvakt.circuit import scoring_circuit
+
 log = logging.getLogger(__name__)
+
+_DEPLOY_SHA = os.environ.get("RAILWAY_GIT_COMMIT_SHA", os.environ.get("VERCEL_GIT_COMMIT_SHA", "unknown"))
+_REGION     = os.environ.get("RAILWAY_REGION", os.environ.get("VERCEL_REGION", "unknown"))
+
+_ORGNR_RE = re.compile(r"^\d{6}-?\d{4}$")
+
+
+def _validate_orgnr(raw: str) -> str:
+    """Return normalized XXXXXX-XXXX or raise HTTPException(400)."""
+    cleaned = raw.replace("-", "").replace(" ", "")
+    if len(cleaned) == 12:
+        cleaned = cleaned[2:]
+    if not re.fullmatch(r"\d{10}", cleaned) or cleaned[0] == "0":
+        raise HTTPException(
+            status_code=400,
+            detail={"error_code": ErrCode.VALIDATION_FAILED, "message": customer_message(ErrCode.VALIDATION_FAILED)},
+        )
+    return f"{cleaned[:6]}-{cleaned[6:]}"
+
+
+def _structured_log(
+    *,
+    orgnr_raw: str,
+    tier: str,
+    latency_ms: float,
+    status_code: int,
+    error_code: Optional[str] = None,
+    error_message: Optional[str] = None,
+    exc: Optional[BaseException] = None,
+) -> None:
+    """Emit one structured JSON line per request to stdout (Vercel/Railway log capture)."""
+    import hashlib as _h
+    entry: dict = {
+        "requestId":        str(uuid.uuid4()),
+        "timestamp":        __import__("datetime").datetime.utcnow().isoformat() + "Z",
+        "route":            "/api/score/{orgnr}",
+        "tier":             tier,
+        "orgnr":            _h.sha256(orgnr_raw.encode()).hexdigest()[:16],  # partial hash, GDPR-safe
+        "latencyMs":        round(latency_ms, 1),
+        "statusCode":       status_code,
+        "errorCode":        error_code,
+        "errorMessage":     error_message,
+        "stackTrace":       None,
+        "deploySha":        _DEPLOY_SHA,
+        "region":           _REGION,
+    }
+    if exc is not None:
+        import traceback
+        entry["stackTrace"] = traceback.format_exception(type(exc), exc, exc.__traceback__)
+    severity = log_severity(ErrCode(error_code)) if error_code else "info"
+    getattr(log, severity)(json.dumps(entry))
 
 _TIER_ORDER = {"free": 0, "silver": 1, "guld": 2, "premium": 3, "enterprise": 4}
 
@@ -98,49 +157,105 @@ def get_score(orgnr: str, request: Request):
     """
     Score a company and return display fields.
 
-    New fields (v2.1): display_score, band, band_label, band_action.
-    internal_score is included for Premium+ only (deprecated alias, sunset 2027-05).
-    Free tier: lifetime cap of 10 searches. Returns 402 when cap reached.
+    Authentication:
+      - No key: Free tier, rate-limited by IP (10 req/min).
+      - Bearer token: tier resolved from api_keys table; Silver+ bypass IP limit.
+
+    Free tier: lifetime cap of 10 searches per key (key optional — anonymous uses IP).
+    Returns 402 when cap reached.
     """
     from scoring.kreditvakt import score_from_db, write_score
     from ingestion.db import Session
 
+    t0 = time.monotonic()
     tier = _tier(request)
 
-    # ── Free-tier lifetime cap ────────────────────────────────────────────────
+    # ── Input validation (3.5) ────────────────────────────────────────────────
+    try:
+        orgnr_normalized = _validate_orgnr(orgnr)
+    except HTTPException as exc:
+        _structured_log(
+            orgnr_raw=orgnr, tier=tier,
+            latency_ms=(time.monotonic() - t0) * 1000,
+            status_code=400,
+            error_code=ErrCode.VALIDATION_FAILED,
+            error_message=f"Invalid orgnr: {orgnr!r}",
+        )
+        raise
+
+    # ── Circuit breaker check (3.3) ───────────────────────────────────────────
+    if not scoring_circuit.allow_request():
+        _structured_log(
+            orgnr_raw=orgnr_normalized, tier=tier,
+            latency_ms=(time.monotonic() - t0) * 1000,
+            status_code=503,
+            error_code=ErrCode.UPSTREAM_DEGRADED,
+            error_message="Circuit open — scoring DB unavailable",
+        )
+        raise HTTPException(
+            status_code=http_status(ErrCode.UPSTREAM_DEGRADED),
+            detail={"error_code": ErrCode.UPSTREAM_DEGRADED, "message": customer_message(ErrCode.UPSTREAM_DEGRADED)},
+        )
+
+    # ── Free-tier quota (key-based when key present, else anonymous) ──────────
+    searches_remaining: Optional[int] = None
     if tier == "free":
         raw_key = _raw_key_from_request(request)
         if raw_key:
-            import hashlib
             from core.db_auth import check_and_increment_searches
-            import asyncio
             key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
             allowed, used, limit = check_and_increment_searches(key_hash)
             if not allowed:
+                _structured_log(
+                    orgnr_raw=orgnr_normalized, tier=tier,
+                    latency_ms=(time.monotonic() - t0) * 1000,
+                    status_code=402,
+                    error_code=ErrCode.SEARCH_LIMIT_REACHED,
+                    error_message=f"searches_used={used} >= limit={limit}",
+                )
                 raise HTTPException(
                     status_code=402,
                     detail={
-                        "error": "Search limit reached",
-                        "message": f"Du har använt dina {limit} sökningar. Uppgradera till Silver för obegränsade sökningar.",
+                        "error_code": ErrCode.SEARCH_LIMIT_REACHED,
+                        "message": customer_message(ErrCode.SEARCH_LIMIT_REACHED),
                         "searches_used": used,
                         "searches_limit": limit,
                         "upgrade_url": _UPGRADE_URL,
                     },
                 )
             searches_remaining = limit - used
-        else:
-            searches_remaining = None
-    else:
-        searches_remaining = None
 
-    # ── Score lookup ──────────────────────────────────────────────────────────
+    # ── Score lookup (3.3 circuit breaker wraps) ──────────────────────────────
     db = Session()
+    score_err_code: Optional[ErrCode] = None
+    exc_captured: Optional[BaseException] = None
     try:
-        result = score_from_db(db, orgnr)
+        result = score_from_db(db, orgnr_normalized)
         write_score(db, result)
-    except Exception as e:
-        log.error(f"[{orgnr}] GET /api/score error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Scoring error — try again")
+        scoring_circuit.record_success()
+    except Exception as exc:
+        scoring_circuit.record_failure()
+        exc_captured = exc
+        # Classify the error
+        exc_str = str(exc).lower()
+        if "timeout" in exc_str or "timed out" in exc_str:
+            score_err_code = ErrCode.UPSTREAM_TIMEOUT
+        elif "schema" in exc_str or "relation" in exc_str or "does not exist" in exc_str:
+            score_err_code = ErrCode.SCHEMA_MISSING
+        else:
+            score_err_code = ErrCode.SCORING_ERROR
+        _structured_log(
+            orgnr_raw=orgnr_normalized, tier=tier,
+            latency_ms=(time.monotonic() - t0) * 1000,
+            status_code=http_status(score_err_code),
+            error_code=score_err_code,
+            error_message=str(exc),
+            exc=exc,
+        )
+        raise HTTPException(
+            status_code=http_status(score_err_code),
+            detail={"error_code": score_err_code, "message": customer_message(score_err_code)},
+        )
     finally:
         db.close()
 
@@ -148,6 +263,12 @@ def get_score(orgnr: str, request: Request):
     if searches_remaining is not None:
         response["searches_remaining"] = searches_remaining
         response["searches_limit"] = _FREE_SEARCHES_LIMIT
+
+    _structured_log(
+        orgnr_raw=orgnr_normalized, tier=tier,
+        latency_ms=(time.monotonic() - t0) * 1000,
+        status_code=200,
+    )
     return response
 
 
@@ -478,6 +599,9 @@ def health():
     from ingestion.db import Session
 
     db = Session()
+    checks: dict = {}
+
+    # T2: scoring output tables
     try:
         row = db.execute(
             text("""
@@ -488,23 +612,41 @@ def health():
                 FROM company_scores
             """)
         ).fetchone()
-        db_ok = True
-        tracked = int(row.tracked_companies) if row else 0
+        checks["company_scores"] = "ok"
+        tracked     = int(row.tracked_companies) if row else 0
         last_scored = row.last_scored.isoformat() if row and row.last_scored else None
-        high_risk = int(row.high_risk_count) if row else 0
+        high_risk   = int(row.high_risk_count) if row else 0
     except Exception as e:
-        db_ok, tracked, last_scored, high_risk = False, 0, None, 0
-        log.error(f"Health check DB error: {e}")
-    finally:
-        db.close()
+        checks["company_scores"] = f"fail: {type(e).__name__}"
+        tracked, last_scored, high_risk = 0, None, 0
+        log.error("Health: company_scores check failed: %s", e)
+
+    # T1: ingestion signal tables
+    for table in ("norric_tax_signals", "norric_payment_signals"):
+        try:
+            db.execute(text(f"SELECT 1 FROM {table} LIMIT 1"))  # noqa: S608
+            checks[table] = "ok"
+        except Exception as e:
+            checks[table] = f"fail: {type(e).__name__}"
+            log.error("Health: %s check failed: %s", table, e)
+
+    db.close()
+
+    checks["circuit_breaker"] = scoring_circuit.state
+
+    all_ok = all(v == "ok" for k, v in checks.items() if k != "circuit_breaker")
+    circuit_ok = scoring_circuit.state in ("closed", "half_open")
+    status = "ok" if (all_ok and circuit_ok) else "degraded"
 
     return {
-        "status": "ok" if db_ok else "degraded",
-        "product": "kreditvakt",
-        "version": "2.1.0",
-        "tracked_companies": tracked,
-        "high_risk_count": high_risk,
-        "last_scored": last_scored,
+        "status":             status,
+        "product":            "kreditvakt",
+        "version":            "2.1.0",
+        "deploy_sha":         _DEPLOY_SHA,
+        "checks":             checks,
+        "tracked_companies":  tracked,
+        "high_risk_count":    high_risk,
+        "last_scored":        last_scored,
     }
 
 
