@@ -256,6 +256,51 @@ def _mock_fallback(orgnr: str) -> dict:
         }
 
     s = r["insolvency_score"]
+
+    # Build signal list from mock engine output fields (mirrors the live scorer format).
+    # The mock engine returns individual signal fields, not a list — construct it here.
+    mock_signals = []
+    if r.get("skuld_sek", 0) > 0:
+        mock_signals.append({
+            "key": "skatteverket_flag",
+            "label": "Skatteskuld publicerad på restanslängden",
+            "value": r["skuld_sek"],
+            "source": "skatteverket",
+            "direction": "risk",
+        })
+    if r.get("betalning_count", 0) > 0:
+        mock_signals.append({
+            "key": "kronofogden_count",
+            "label": f"Betalningsförelägganden: {r['betalning_count']} de senaste 6 månaderna",
+            "value": r["betalning_count"],
+            "source": "kronofogden",
+            "direction": "risk",
+        })
+    if r.get("arende_obetald"):
+        mock_signals.append({
+            "key": "bolagsverket_arende",
+            "label": "Obetald ärendeavgift hos Bolagsverket",
+            "value": r.get("arende_total_avgift_sek"),
+            "source": "bolagsverket",
+            "direction": "risk",
+        })
+    if not r.get("f_skatt_active", True):
+        mock_signals.append({
+            "key": "f_skatt_revoked",
+            "label": "F-skatt återkallad",
+            "value": False,
+            "source": "skatteverket",
+            "direction": "risk",
+        })
+    if r.get("konkurs_filed"):
+        mock_signals.append({
+            "key": "konkurs_petition",
+            "label": "Konkursansökan registrerad (senaste 12 månader)",
+            "value": True,
+            "source": "bolagsverket",
+            "direction": "risk",
+        })
+
     return {
         "orgnr": r["orgnr"],
         "company_name": r.get("company_name"),
@@ -263,8 +308,8 @@ def _mock_fallback(orgnr: str) -> dict:
         "distress_probability": round(s / 100, 4),
         "risk_band": _band(s / 100),
         "insolvency_score": s,
-        "signals": [],
-        "signals_fired": r.get("signal_count", 0),
+        "signals": mock_signals,
+        "signals_fired": len(mock_signals),
         "signals_total": 5,
         "skuld_sek": r.get("skuld_sek", 0),
         "skatteverket_flag": r.get("skuld_sek", 0) > 0,

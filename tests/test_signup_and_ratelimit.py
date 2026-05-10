@@ -128,18 +128,20 @@ class TestOrgCap:
         resp = self._run_signup("5561234567", existing_count=11)
         assert resp.status_code == 403
 
-    def test_unknown_orgnr_returns_400(self):
+    def test_unknown_orgnr_is_accepted(self):
+        # DB existence check removed — any validly formatted orgnr is accepted
+        # at signup. Format-only validation (10 digits, non-zero first digit) stays.
         from fastapi.testclient import TestClient
         from issuance.main import app
-        with patch("issuance.main._validate_orgnr_exists", return_value=None):
+        with patch("issuance.main._free_org_key_count", return_value=(0, None)), \
+             patch("issuance.main._issue_key", return_value="nrk_test"):
             client = TestClient(app)
             resp = client.post("/signup/free", json={
                 "email": "test@test.se",
                 "org_nr": "9999999999",
                 "company": "Ghost AB",
             })
-        assert resp.status_code == 400
-        assert "organisationsnummer" in resp.json()["detail"].lower()
+        assert resp.status_code == 201
 
 
 # ── Free-tier search cap ──────────────────────────────────────────────────────

@@ -259,29 +259,21 @@ class FreeSignupRequest(BaseModel):
 
 @app.post("/signup/free", status_code=201)
 async def signup_free(body: FreeSignupRequest):
-    # Validate org exists in Bolagsverket bulk data (skipped pre-ingestion)
-    org_name = _validate_orgnr_exists(body.org_nr)
-    if org_name is None:
-        # None = table exists but org not found. "" = table unavailable (pre-ingestion) — allow through.
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Vi hittar inte detta organisationsnummer. "
-                "Om företaget är nyregistrerat kan det dröja upp till 24 timmar "
-                "innan det visas i vårt register. "
-                "Försök igen senare eller kontakta hej@norric.io."
-            ),
-        )
+    # Format validation is handled by the FreeSignupRequest Pydantic validator.
+    # The norric_entities DB lookup that previously gated signup on entity existence
+    # is removed: it blocked all signups while ingestion is incomplete (0 rows).
+    # Re-introduce the existence check after national ingestion covers >90% of BRFs.
 
     # Org cap: max _FREE_ORG_CAP free keys per org
-    count, _ = _free_org_key_count(body.org_nr)
+    count, org_name = _free_org_key_count(body.org_nr)
     if count >= _FREE_ORG_CAP:
+        company_label = org_name or body.org_nr
         raise HTTPException(
             status_code=403,
             detail={
                 "error": "Org cap reached",
                 "message": (
-                    f"{org_name} har redan registrerat 10 Free-konton. "
+                    f"{company_label} har redan registrerat {_FREE_ORG_CAP} Free-konton. "
                     "Uppgradera till Silver för obegränsade konton och sökningar."
                 ),
                 "upgrade_url": _UPGRADE_URL,
