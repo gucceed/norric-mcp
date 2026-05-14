@@ -17,6 +17,12 @@ beat_schedule = {
         "schedule": crontab(hour=3, minute=0),
         "options": {"timezone": "Europe/Stockholm"},
     },
+    # T1-01b Bolagsverket konkurs — daily 03:15 (after bulk; reuses cached zip)
+    "bolagsverket-konkurs-daily": {
+        "task": "bolagsverket.konkurs_ingest",
+        "schedule": crontab(hour=3, minute=15),
+        "options": {"timezone": "Europe/Stockholm"},
+    },
     # T1-02 Skatteverket restanslängd — Monday 04:00
     "skatteverket-restanslangd-weekly": {
         "task": "skatteverket.restanslangd_ingest",

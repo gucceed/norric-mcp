@@ -166,3 +166,75 @@ and prints existing PR URLs from `submissions.json`.
 
 **Adding future servers (Sigvik, Kreditvakt, SIGNAL, Vigil):** Copy a YAML entry in `servers.yaml`,
 run the CLI, paste two form payloads. Target: 10 minutes per server.
+
+---
+
+## 2026-05-14: Bolagsverket konkursansökan ingestion live
+
+Built end-to-end bulk-file konkurs ingester. Kreditvakt `/score` now returns
+**real** signals for any AB or BRF with a konkursansökan filed in the
+trailing 24 months.
+
+### Sources
+- Bulk file: `bolagsverket_bulkfil.zip` via
+  `BOLAGSVERKET_DIRECT_URL=https://vardefulla-datamangder.bolagsverket.se/bolagsverket/bolagsverket_bulkfil.zip`
+  (S3-backed CDN, no CAPTCHA, ~245 MB compressed, ~977 MB unzipped)
+- Cadence: weekly Sunday→Monday 01:30-03:30 UTC drop. Daily cron picks it up
+  same-day via etag-aware cache reuse.
+- Code mapping: alphabetic kodlista from
+  `nedladdningsbara_filer.html` sections 2–3 (documented), plus 8 empirically-
+  observed `-AVSLAVOMFO` suffix variants flagged with
+  `raw_data->>'documentation_status' = 'empirical'` for future audit.
+- Cross-reference to Näringslivsregistret's numeric `statuskoder.pdf` system
+  via `ALPHABETIC_TO_NUMERIC_MAPPING` in `konkurs_parser.py`.
+
+### Coverage (first production run, 2026-05-14)
+- 29,206 konkurs records in `norric_payment_signals`
+- 99.2% AB-ORGFO (28,983), 0.8% BRF-ORGFO (223)
+- 11,527 active filings (status_code=`KK-AVOMFO`) + 17,679 concluded historical
+  (status_code=`KKAV-AVORG`)
+- `filed_at` window: 2024-05-14 → 2026-05-08
+
+### Schema
+Additive migration `2026_05_13_konkurs_signals.sql` applied:
+- `norric_payment_signals.status_code TEXT` (nullable)
+- UNIQUE INDEX `idx_norric_payment_signals_orgnr_case_ref` on `(orgnr, case_ref)`
+- Both up + down migrations recorded; reversible
+
+### Operational
+- Daily Celery beat: `bolagsverket-konkurs-daily` at 03:15 Europe/Stockholm
+- Telemetry: `norric_pipeline_runs` row written per execution
+- Idempotent: `ON CONFLICT (orgnr, case_ref) DO UPDATE` preserves created_at
+- Cache: `/tmp/bolagsverket-cache` with 7-day retention
+
+### Reversibility
+HIGH at the data layer (DELETE WHERE raw_data->>'signal_type' = 'konkurs').
+HIGH at the schema layer (companion `.down.sql` exists, additive only).
+HIGH at the cron layer (remove beat entry → no new ingests).
+
+### Known follow-ups (NOT fixed in this commit)
+1. **Scorer Kronofogden over-counts konkurs rows.** `scoring/kreditvakt.py:85-97`
+   queries `norric_payment_signals` without filtering on
+   `raw_data->>'signal_type'`. Now that konkurs rows share the table, every
+   orgnr with a konkurs filing also gets `kronofogden_count_6mo += 1` falsely.
+   One-line fix: add `AND raw_data->>'signal_type' IN ('kronofogden_payment_order')`.
+   Held back per "no scorer weighting changes without Edgar" rule.
+2. **Bolagsverket `-AVSLAVOMFO` suffix variants are empirically documented,
+   not officially.** Email drafted at
+   `ingestion/bolagsverket/reference/apier_email_draft.md` to apier@bolagsverket.se
+   to lock the semantics. Send when ready; until then 8 suffix codes carry
+   `documentation_status: 'empirical'` in `raw_data`.
+3. **Score-weight tuning.** A company with an active konkursansökan currently
+   scores band 3 (Elevated, ≈0.27 distress probability). The `bolagsverket_petition`
+   weight is 0.15. Edgar's call whether to lift this for konkurs specifically
+   (separate from rekonstruktion / ackord / resolution).
+4. **`bulk_parser.py` name bug** (pre-existing): reads `row[1]` as name but
+   field 1 is `namnskyddslopnummer`. Actual name is field 3. Not touched in
+   this build to keep scope tight; `konkurs_parser.py` reads field 3 correctly.
+
+### Review trigger
+- Monthly coverage audit: rows inserted by `bolagsverket-konkurs-daily` should
+  range 100–500 per week (new konkurs filings in Sweden). Material deviation
+  → investigate Bolagsverket cadence change or parser drift.
+- Any week without a successful `pipeline_run` for >3 consecutive days →
+  page Edgar.
