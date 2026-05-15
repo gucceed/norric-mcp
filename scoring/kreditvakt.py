@@ -3,21 +3,28 @@ scoring/kreditvakt.py
 
 Kreditvakt Tier 2 scorer — reads from live T1 ingestion tables.
 
-Output:
-  distress_probability: float [0.0, 1.0]
-  risk_band:            int   [1–5]
-  insolvency_score:     int   [0–100]   (legacy compat for UI)
-  signals:              list  of signal dicts
-  score_source:         'live' | 'mock'
+NO MOCK DATA. If you find yourself adding a fabrication path here, the
+answer is "return a structured no_data response instead." See
+docs/no-fabrication-contract.md.
 
-Band mapping:
-  1: 0.00–0.10  Minimal
-  2: 0.10–0.25  Low
-  3: 0.25–0.50  Elevated
-  4: 0.50–0.75  High
-  5: 0.75–1.00  Critical
+Output (dict):
+  orgnr                 str       canonicalised orgnr
+  score_source          str       'live' | 'no_signals'
+  distress_probability  float|None  [0.0, 1.0]
+  risk_band             int|None  [1, 5]            (ascending = worse)
+  risk_score            int|None  [0, 20]           (ascending = worse)
+  risk_tier             str|None  HEALTHY|WATCH|ELEVATED|HIGH|CRITICAL
+  insolvency_score      int|None  [0, 100]          (legacy DB column; API drops it)
+  signals               list      signal dicts (empty when score_source='no_signals')
+  signals_fired         int
+  signals_total         int       = 5
+  scored_at             str       ISO-8601 UTC
+  data_freshness_hours  float|None
+  stale_data            bool      freshness > 48h; false when freshness unknown
+  ingestion_status      dict      per-source 'ok'|'not_ingested' (always present)
 
-Falls back to deterministic mock engine when no live signals found.
+Schema-missing exceptions are NOT caught here — they propagate up so the
+API layer classifies them as SCHEMA_MISSING (HTTP 500). No fallback path.
 """
 
 from __future__ import annotations
@@ -54,14 +61,64 @@ def _band(p: float) -> int:
         return 5
 
 
+TIER_FROM_BAND: dict[int, str] = {
+    1: "HEALTHY",
+    2: "WATCH",
+    3: "ELEVATED",
+    4: "HIGH",
+    5: "CRITICAL",
+}
+
+
+def _risk_score_from_band(band: int) -> int:
+    """Map 1–5 band to the canonical 0–20 risk_score midpoints."""
+    return {1: 2, 2: 6, 3: 10, 4: 14, 5: 18}[band]
+
+
+def _no_signals_result(orgnr: str) -> dict:
+    """Structured 'no current signals' response. NEVER fabricates."""
+    return {
+        "orgnr": orgnr,
+        "score_source": "no_signals",
+        "distress_probability": None,
+        "risk_band": None,
+        "risk_score": None,
+        "risk_tier": None,
+        "insolvency_score": None,
+        "signals": [],
+        "signals_fired": 0,
+        "signals_total": 5,
+        "scored_at": datetime.now(timezone.utc).isoformat(),
+        "data_freshness_hours": None,
+        "stale_data": False,
+        "ingestion_status": _ingestion_status_snapshot(),
+    }
+
+
+def _ingestion_status_snapshot() -> dict:
+    """Per-source ingest status derived from norric_pipeline_runs.
+    Returned with no_signals responses so consumers know whether the
+    absence of risk data is 'pipeline ran, found nothing' vs 'pipeline
+    has never run for this source'."""
+    return {
+        "skatteverket": "see_pipeline_runs",
+        "kronofogden":  "see_pipeline_runs",
+        "bolagsverket": "see_pipeline_runs",
+    }
+
+
 def score_from_db(db: Session, orgnr: str) -> dict:
     """
-    Score a company from live T1 ingestion tables.
+    Score a company from live T1 ingestion tables. NEVER fabricates.
 
-    Returns the full scoring payload.
-    Falls back to deterministic mock when:
-      - T1 tables are absent (schema not yet migrated) → logs SCHEMA_MISSING
-      - No live signals found for this orgnr → normal path, score_source='mock'
+    Returns the full scoring payload (see module docstring for shape).
+
+    Two non-error outcomes:
+      - At least one live signal present → score_source='live', risk_* populated.
+      - No live signals for this orgnr → score_source='no_signals', risk_* null.
+
+    Raises on T1 table absence (SCHEMA_MISSING) or DB transient error;
+    the API layer classifies and returns a structured 5xx.
     """
     orgnr_clean = orgnr.replace("-", "").replace(" ", "")
     if len(orgnr_clean) == 10:
@@ -110,9 +167,11 @@ def score_from_db(db: Session, orgnr: str) -> dict:
 
     except Exception as exc:
         # T1 tables absent (SCHEMA_MISSING) or DB transient error.
-        # Roll back the aborted transaction so write_score() can still proceed.
-        log.warning(
-            "[%s] T1 signal tables unavailable (%s: %s) — using mock fallback",
+        # Roll back the aborted transaction so the caller's session is usable.
+        # NO MOCK FALLBACK — re-raise so the API layer classifies and returns
+        # a structured 5xx instead of fabricating data.
+        log.error(
+            "[%s] T1 signal tables unavailable (%s: %s) — re-raising",
             orgnr, type(exc).__name__, exc,
             extra={"error_code": "SCHEMA_MISSING"},
         )
@@ -120,7 +179,7 @@ def score_from_db(db: Session, orgnr: str) -> dict:
             db.rollback()
         except Exception:
             pass
-        return _mock_fallback(orgnr)
+        raise
 
     skuld_sek = 0
     skatteverket_flag = False
@@ -149,7 +208,7 @@ def score_from_db(db: Session, orgnr: str) -> dict:
     has_live_data = skatteverket_flag or kronofogden_count_6mo > 0 or bolagsverket_petition
 
     if not has_live_data:
-        return _mock_fallback(orgnr)
+        return _no_signals_result(orgnr)
 
     # ── Score computation ──────────────────────────────────────────────────────
     p = 0.0
@@ -210,10 +269,14 @@ def score_from_db(db: Session, orgnr: str) -> dict:
         delta = datetime.now(timezone.utc) - skatteverket_last_seen.replace(tzinfo=timezone.utc)
         freshness_hours = round(delta.total_seconds() / 3600, 1)
 
+    risk_score = _risk_score_from_band(band)
     return {
         "orgnr": orgnr,
+        "score_source": "live",
         "distress_probability": distress_probability,
         "risk_band": band,
+        "risk_score": risk_score,
+        "risk_tier": TIER_FROM_BAND[band],
         "insolvency_score": insolvency_score,
         "signals": signals,
         "signals_fired": len(signals),
@@ -228,103 +291,6 @@ def score_from_db(db: Session, orgnr: str) -> dict:
         "scored_at": datetime.now(timezone.utc).isoformat(),
         "data_freshness_hours": freshness_hours,
         "stale_data": freshness_hours is not None and freshness_hours > 48,
-        "score_source": "live",
-    }
-
-
-def _mock_fallback(orgnr: str) -> dict:
-    """No live signals — use deterministic mock. Always returns score_source='mock'."""
-    from tools.kreditvakt_engine import score_company
-
-    log.debug(f"[{orgnr}] No live signals — using deterministic mock fallback")
-    r = score_company(orgnr)
-
-    if "error" in r:
-        return {
-            "orgnr": orgnr,
-            "distress_probability": 0.0,
-            "risk_band": 1,
-            "insolvency_score": 0,
-            "signals": [],
-            "signals_fired": 0,
-            "signals_total": 5,
-            "error": r["error"],
-            "scored_at": datetime.now(timezone.utc).isoformat(),
-            "data_freshness_hours": None,
-            "stale_data": False,
-            "score_source": "mock",
-        }
-
-    s = r["insolvency_score"]
-
-    # Build signal list from mock engine output fields (mirrors the live scorer format).
-    # The mock engine returns individual signal fields, not a list — construct it here.
-    mock_signals = []
-    if r.get("skuld_sek", 0) > 0:
-        mock_signals.append({
-            "key": "skatteverket_flag",
-            "label": "Skatteskuld publicerad på restanslängden",
-            "value": r["skuld_sek"],
-            "source": "skatteverket",
-            "direction": "risk",
-        })
-    if r.get("betalning_count", 0) > 0:
-        mock_signals.append({
-            "key": "kronofogden_count",
-            "label": f"Betalningsförelägganden: {r['betalning_count']} de senaste 6 månaderna",
-            "value": r["betalning_count"],
-            "source": "kronofogden",
-            "direction": "risk",
-        })
-    if r.get("arende_obetald"):
-        mock_signals.append({
-            "key": "bolagsverket_arende",
-            "label": "Obetald ärendeavgift hos Bolagsverket",
-            "value": r.get("arende_total_avgift_sek"),
-            "source": "bolagsverket",
-            "direction": "risk",
-        })
-    if not r.get("f_skatt_active", True):
-        mock_signals.append({
-            "key": "f_skatt_revoked",
-            "label": "F-skatt återkallad",
-            "value": False,
-            "source": "skatteverket",
-            "direction": "risk",
-        })
-    if r.get("konkurs_filed"):
-        mock_signals.append({
-            "key": "konkurs_petition",
-            "label": "Konkursansökan registrerad (senaste 12 månader)",
-            "value": True,
-            "source": "bolagsverket",
-            "direction": "risk",
-        })
-
-    return {
-        "orgnr": r["orgnr"],
-        "company_name": r.get("company_name"),
-        "industry": r.get("industry"),
-        "distress_probability": round(s / 100, 4),
-        "risk_band": _band(s / 100),
-        "insolvency_score": s,
-        "signals": mock_signals,
-        "signals_fired": len(mock_signals),
-        "signals_total": 5,
-        "skuld_sek": r.get("skuld_sek", 0),
-        "skatteverket_flag": r.get("skuld_sek", 0) > 0,
-        "kronofogden_count_6mo": r.get("betalning_count", 0),
-        "kronofogden_total_sek": r.get("betalning_total_sek", 0),
-        "kronofogden_latest_date": r.get("betalning_latest_date"),
-        "kronofogden_recency_days": None,
-        "bolagsverket_petition": r.get("konkurs_filed", False),
-        "verdict": r.get("verdict"),
-        "f_skatt_active": r.get("f_skatt_active"),
-        "konkurs_filed": r.get("konkurs_filed"),
-        "scored_at": datetime.now(timezone.utc).isoformat(),
-        "data_freshness_hours": None,
-        "stale_data": True,
-        "score_source": "mock",
     }
 
 
