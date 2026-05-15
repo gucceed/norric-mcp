@@ -106,4 +106,18 @@ beat_schedule = {
         "schedule": crontab(day_of_week=0, hour=3, minute=0),
         "options": {"timezone": "Europe/Stockholm"},
     },
+
+    # ── SIGNAL: Kreditvakt cross-signal ────────────────────────────────────────
+    # Score newly scraped contracts every 15 minutes
+    "signal-score-unscored-15m": {
+        "task": "signal.score_unscored",
+        "schedule": crontab(minute="*/15"),
+        "options": {"expires": 600},
+    },
+    # Rescore active contracts nightly (02:15 UTC ≈ 04:15 CEST Stockholm)
+    "signal-rescore-active-nightly": {
+        "task": "signal.rescore_active",
+        "schedule": crontab(hour=2, minute=15),
+        "options": {"expires": 7200},
+    },
 }

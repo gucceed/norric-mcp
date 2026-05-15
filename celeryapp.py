@@ -13,4 +13,5 @@ app.autodiscover_tasks([
     "ingestion.tasks.lantmateriet_tasks",
     "ingestion.tasks.boverket_tasks",
     "ingestion.tasks.diarium_tasks",
+    "kreditvakt.signal_cross",
 ])
