@@ -1,9 +1,9 @@
 """
 Batched upsert writer for norric_entities.
 On conflict on orgnr: updates mutable fields and last_seen_at.
-After each batch, writes snapshots for changed entities.
+After each batch, writes snapshots for ALL entities via the batched
+snapshot API (2 round-trips per 500 entities instead of ~1000).
 """
-import json
 import logging
 from datetime import date
 from typing import Iterator
@@ -12,7 +12,7 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from ingestion.snapshots.writer import write_snapshot
+from ingestion.snapshots.writer import write_snapshots_batch
 
 log = logging.getLogger(__name__)
 
@@ -27,7 +27,8 @@ def upsert_entities(
     dry_run: bool = False,
 ) -> dict:
     snap_date = snapshot_date or date.today()
-    stats = {"inserted": 0, "updated": 0, "skipped": 0}
+    stats = {"inserted": 0, "updated": 0, "skipped": 0,
+             "snapshots_inserted": 0, "snapshots_skipped": 0}
 
     batch: list[dict] = []
 
@@ -74,17 +75,17 @@ def upsert_entities(
             else:
                 stats["updated"] += 1
 
-            entity = next((r for r in batch if r["orgnr"] == row.orgnr), None)
-            if entity:
-                write_snapshot(
-                    db=db,
-                    entity_id=row.orgnr,
-                    entity_type="company",
-                    source="bolagsverket",
-                    snapshot_date=snap_date,
-                    data=entity,
-                    pipeline_run_id=run_id,
-                )
+        snap_stats = write_snapshots_batch(
+            db=db,
+            records=batch,
+            entity_type="company",
+            source="bolagsverket",
+            snapshot_date=snap_date,
+            pipeline_run_id=run_id,
+            entity_id_key="orgnr",
+        )
+        stats["snapshots_inserted"] += snap_stats["inserted"]
+        stats["snapshots_skipped"]  += snap_stats["skipped"]
 
         db.commit()
 
@@ -92,7 +93,11 @@ def upsert_entities(
         batch.append(record)
         if len(batch) >= BATCH_SIZE:
             flush(batch)
-            log.info("flushed batch: inserted=%d updated=%d", stats["inserted"], stats["updated"])
+            log.info(
+                "flushed batch: inserted=%d updated=%d snapshots=%d/skipped=%d",
+                stats["inserted"], stats["updated"],
+                stats["snapshots_inserted"], stats["snapshots_skipped"],
+            )
             batch = []
 
     flush(batch)
