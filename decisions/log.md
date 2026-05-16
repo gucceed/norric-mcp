@@ -238,3 +238,31 @@ HIGH at the cron layer (remove beat entry → no new ingests).
   → investigate Bolagsverket cadence change or parser drift.
 - Any week without a successful `pipeline_run` for >3 consecutive days →
   page Edgar.
+
+---
+
+## 2026-05-16: Konkursansökan ingestion live
+
+Built end-to-end bulk-file konkurs ingester for Bolagsverket. First production ingest 2026-05-14 wrote 29,206 real konkurs rows (28,983 AB + 223 BRF, filed_at range 2024-05-14 → 2026-05-08). `/score` now returns `score_source: "live"` with `bolagsverket_petition: true` for any AB/BRF in coverage. Idempotency re-run 2026-05-16 confirmed `inserted=0, updated=29,131` (75 rows aged out of the rolling 24-month window).
+
+**Sources:**
+- Bulk file: `https://vardefulla-datamangder.bolagsverket.se/bolagsverket/bolagsverket_bulkfil.zip` (HTTP 200 via curl, no auth, AWS S3-backed, weekly Sunday→Monday cadence).
+- Code mapping: kodlista embedded in `bolagsverket.se/apierochoppnadata/nedladdningsbarafiler.2517.html`, fetched via Playwright into `ingestion/bolagsverket/reference/nedladdningsbara_filer.html` and extracted to `kodlista_extracted.json`. Five sections, 64 codes total.
+
+**Critical finding:** The bulk file uses **alphabetic mnemonic codes** (KK-AVOMFO, KKAV-AVORG, KKAVOV-AVSLAVOMFO …), NOT the numeric two-digit codes in Bolagsverket's Näringslivsregistret statuskoder.pdf (20, 21, 22, 24 …). These are two separate code systems. The bulk file is ground truth for ingestion; the numeric system is preserved in `raw_data.status_numeric` per `ALPHABETIC_TO_NUMERIC_MAPPING` in `konkurs_parser.py` for cross-referencing public documentation.
+
+**Eight suffix-variant codes** (KKAVOV-AVSLAVOMFO, KKUHAVD-AVSLAVOMFO, LIUHOR-AVSLAVOMFO, LIUHAVD-AVSLAVOMFO, ACUHOR-AVSLAVOMFO, ACUHAVD-AVSLAVOMFO, FRUHOR-AVSLAVOMFO, FRUHAVD-AVSLAVOMFO) observed in field 7 but undocumented in the kodlista. Tagged `raw_data->>'documentation_status' = 'empirical'` for queryable audit. Apier@ email drafted at `ingestion/bolagsverket/reference/apier-email-draft.md` for confirmation.
+
+**Schema changes:** Additive migration `migrations/2026_05_13_konkurs_signals.sql` — `status_code TEXT` column + UNIQUE INDEX on `(orgnr, case_ref)`. Down migration available. Applied via psycopg2 with pre/post verification.
+
+**Cron:** `bolagsverket.konkurs_ingest` registered in `ingestion/tasks/bolagsverket_tasks.py`, scheduled daily 03:15 Europe/Stockholm in `celeryconfig.py`. Idempotent (UPSERT on UNIQUE), cached zip reused for 7 days, autoretry 3× on exception.
+
+**Reversibility:** HIGH. Additive migration with working down. Cron task disablable by removing the beat entry. `_mock_fallback` in scorer remains gated behind real-orgnr check; reverting konkurs ingestion to mock requires no code change.
+
+**Review trigger:**
+- Monthly coverage audit (count of distinct orgnrs with KK-AVOMFO in trailing 365d).
+- Any ingestion failure for >3 consecutive days (Resend alert wired via existing pipeline_run telemetry).
+- apier@bolagsverket.se reply landing — flip `documentation_status` on 8 suffix-variant rows from `'empirical'` to `'documented'` via SQL in the email-draft file.
+
+**Known issue surfaced (not introduced):** Scorer's Kronofogden count query in `scoring/kreditvakt.py` lacks a `raw_data->>'signal_type'` filter — our konkurs rows are being double-counted as Kronofogden cases. Pre-existing bug, only visible now that real konkurs data is present. Separate fix.
+
