@@ -391,7 +391,12 @@ def get_score(orgnr: str, request: Request):
     # ── Score lookup (3.3 circuit breaker wraps) ──────────────────────────────
     try:
         result = score_from_db(db, orgnr_normalized)
-        write_score(db, result)
+        # Only persist when there's a real score. The no_signals path has
+        # null risk_* fields, which violate company_scores' NOT NULL
+        # constraints on distress_probability / risk_band / insolvency_score.
+        # No score to cache → nothing to persist.
+        if result.get("score_source") == "live":
+            write_score(db, result)
         scoring_circuit.record_success()
     except Exception as exc:
         scoring_circuit.record_failure()
