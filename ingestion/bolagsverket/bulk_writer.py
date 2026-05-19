@@ -4,6 +4,8 @@ On conflict on orgnr: updates mutable fields and last_seen_at.
 After each batch, writes snapshots for ALL entities via the batched
 snapshot API (2 round-trips per 500 entities instead of ~1000).
 """
+from __future__ import annotations
+
 import logging
 from datetime import date
 from typing import Iterator
