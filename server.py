@@ -367,64 +367,74 @@ async def signal_sweden_pulse(
 # NORRIC KREDITVAKT — Company insolvency intelligence
 # ════════════════════════════════════════════════════════════════════════════════
 
+def _score_orgnr_via_db(orgnr: str) -> dict:
+    """Validate orgnr, fetch entity + score from live DB. NO MOCK FALLBACK.
+
+    Returns a tagged dict:
+      {"ok": True, "result": <score_from_db dict>, "entity": {name, status, deregistered_at}}
+      {"ok": False, "kind": "invalid_orgnr"|"orgnr_not_ingested"|"scoring_error",
+       "message": str, "orgnr": str}
+
+    All four Kreditvakt MCP tools route through this so fabrication is
+    impossible from the MCP surface.
+    """
+    try:
+        norm = validate_orgnr(orgnr)
+    except ValueError as exc:
+        return {"ok": False, "kind": "invalid_orgnr", "message": str(exc), "orgnr": orgnr}
+
+    from ingestion.db import Session
+    from scoring.kreditvakt import score_from_db
+    from sqlalchemy import text as _text
+
+    db = Session()
+    try:
+        # norric_entities.orgnr is dashless (canonical key); orgnr_display is dashed.
+        # validate_orgnr returned the dashed form — match against orgnr_display.
+        try:
+            entity_row = db.execute(
+                _text("""
+                    SELECT orgnr, name, is_active, deregistered_at
+                    FROM norric_entities
+                    WHERE orgnr_display = :orgnr
+                """),
+                {"orgnr": norm},
+            ).fetchone()
+        except Exception as ent_exc:
+            try: db.rollback()
+            except Exception: pass
+            return {"ok": False, "kind": "scoring_error",
+                    "message": f"norric_entities lookup failed: {type(ent_exc).__name__}: {ent_exc}",
+                    "orgnr": norm}
+
+        if entity_row is None:
+            return {"ok": False, "kind": "orgnr_not_ingested",
+                    "message": "orgnr not in norric_entities", "orgnr": norm}
+
+        try:
+            result = score_from_db(db, norm)
+        except Exception as exc:
+            return {"ok": False, "kind": "scoring_error",
+                    "message": f"{type(exc).__name__}: {exc}", "orgnr": norm}
+
+        return {
+            "ok": True,
+            "result": result,
+            "entity": {
+                "name": entity_row.name,
+                "status": "active" if entity_row.is_active else "deregistered",
+                "deregistered_at": entity_row.deregistered_at.isoformat() if getattr(entity_row, "deregistered_at", None) else None,
+            },
+        }
+    finally:
+        db.close()
+
+
 def _kreditvakt_signals(r: dict) -> list[dict]:
-    """Convert a kreditvakt engine result into NorricSignal-compatible dicts."""
-    signals = []
-    if r.get("skuld_sek", 0):
-        signals.append({
-            "key": "skuld_published",
-            "label": "Skatteskuld publicerad",
-            "value": r["skuld_sek"],
-            "weight": 0.45,
-            "direction": "risk",
-            "source": "skatteverket",
-        })
-    if r.get("betalning_count", 0):
-        signals.append({
-            "key": "betalningsforelagganden",
-            "label": "Betalningsförelägganden (Kronofogden)",
-            "value": r["betalning_count"],
-            "weight": 0.30,
-            "direction": "risk",
-            "source": "kronofogden",
-        })
-    if r.get("kronofogden_escalated"):
-        signals.append({
-            "key": "kronofogden_escalated",
-            "label": "Eskalerat ärende Kronofogden",
-            "value": True,
-            "weight": 0.35,
-            "direction": "risk",
-            "source": "kronofogden",
-        })
-    if not r.get("f_skatt_active", True):
-        signals.append({
-            "key": "f_skatt_revoked",
-            "label": "F-skatt återkallad",
-            "value": True,
-            "weight": 0.50,
-            "direction": "risk",
-            "source": "skatteverket",
-        })
-    if r.get("arende_obetald"):
-        signals.append({
-            "key": "arende_obetald",
-            "label": "Obetald ärendeavgift Bolagsverket",
-            "value": r.get("arende_total_avgift_sek", 0) - r.get("arende_betalt_belopp_sek", 0),
-            "weight": 0.20,
-            "direction": "risk",
-            "source": "bolagsverket",
-        })
-    if r.get("konkurs_filed"):
-        signals.append({
-            "key": "konkurs_filed",
-            "label": "Konkursansökan registrerad",
-            "value": r.get("konkurs_date"),
-            "weight": 1.00,
-            "direction": "risk",
-            "source": "bolagsverket",
-        })
-    return signals
+    """Pass-through of score_from_db's signals list. Kept for backwards
+    compat with the score_company_v1 tool's signals= argument; score_from_db
+    already emits the canonical signal shape, so no derivation needed."""
+    return list(r.get("signals") or [])
 
 @mcp.tool(
     name="kreditvakt_score_company_v1",
@@ -433,10 +443,12 @@ def _kreditvakt_signals(r: dict) -> list[dict]:
         "Skatteverket restanslängd (tax debt), Kronofogden betalningsförelägganden (payment orders), "
         "Bolagsverket pending ärenden (leading indicator — days before registration), "
         "and Bolagsverket konkursregister. "
-        "Returns distress_probability [0.0–1.0], risk_band [1–5], and full signal breakdown. "
-        "score_source='live' means DB-backed signals. score_source='mock' means deterministic fallback "
-        "(company not yet ingested). stale_data=true means freshness > 48h. "
-        "Accepts either a Swedish organisation number (e.g. 556000-1234) or a company name."
+        "Returns risk_score [0–20, ascending=worse], risk_band [1–5], risk_tier "
+        "(HEALTHY|WATCH|ELEVATED|HIGH|CRITICAL), and full signal breakdown. "
+        "score_source='live' means DB-backed signals; 'no_signals' means the orgnr is "
+        "in norric_entities but no current risk data exists (risk_score will be null). "
+        "stale_data=true means freshness > 48h. "
+        "Accepts a Swedish organisation number (e.g. 556000-1234)."
     ),
 )
 async def kreditvakt_score_company(
@@ -451,28 +463,51 @@ async def kreditvakt_score_company(
                deterministic orgnr. Well-known companies (Ikea, Volvo, Ericsson…)
                are always scored as low-risk.
     """
-    result = _score_with_live_fallback(orgnr)
-
-    if "error" in result:
+    # NO MOCK FALLBACK. score_from_db returns either a 'live' or 'no_signals'
+    # dict, or raises (SCHEMA_MISSING / DB error) — never fabricates.
+    from ingestion.db import Session
+    from scoring.kreditvakt import score_from_db
+    db = Session()
+    try:
+        result = score_from_db(db, orgnr)
+    except Exception as exc:
         return wrap(
             tool="kreditvakt_score_company_v1",
             source=[],
             confidence=0.0,
             ttl=0,
             data={},
-            warnings=[result["error"]],
+            warnings=[f"scoring_error: {type(exc).__name__}"],
+        )
+    finally:
+        db.close()
+
+    if result.get("score_source") == "no_signals":
+        return wrap(
+            tool="kreditvakt_score_company_v1",
+            source=["skatteverket", "kronofogden", "bolagsverket"],
+            confidence=0.0,
+            ttl=3_600,
+            data={
+                "orgnr":         result["orgnr"],
+                "score_source":  "no_signals",
+                "risk_score":    None,
+                "risk_band":     None,
+                "risk_tier":     None,
+                "scale":         "0-20",
+                "polarity":      "ascending_risk",
+                "scored_at":     result["scored_at"],
+                "ingestion_status": result.get("ingestion_status"),
+            },
+            signals=[],
+            warnings=["no_signals: no current risk data for this orgnr"],
         )
 
-    from scoring.display import to_display
     p = result.get("distress_probability", 0.0)
-    ds, _ = to_display(p, last_displayed_band=result.get("last_displayed_band"))
-
     confidence_num = max(0.0, 1.0 - p)
     warnings = []
     if result.get("stale_data"):
         warnings.append(f"Data freshness {result.get('data_freshness_hours', '?')}h — exceeds 48h threshold")
-    if result.get("score_source") == "mock":
-        warnings.append("Score derived from deterministic model — company not yet in live ingestion pipeline")
 
     signals = _kreditvakt_signals(result)
 
@@ -482,46 +517,21 @@ async def kreditvakt_score_company(
         confidence=round(confidence_num, 2),
         ttl=3_600,
         data={
-            **result,
-            # v2.1 display fields (additive)
-            "display_score": ds.display_score,
-            "band":          ds.band,
-            "band_label":    ds.band_label,
-            "band_action":   ds.band_action,
-            # deprecated aliases (sunset 2027-05) — use display_score/band instead
-            "insolvency_score": result.get("insolvency_score"),
-            "risk_band":        result.get("risk_band"),
-            "scored_at":        result.get("scored_at"),
+            "orgnr":          result["orgnr"],
+            "score_source":   "live",
+            "risk_score":     result["risk_score"],
+            "risk_band":      result["risk_band"],
+            "risk_tier":      result["risk_tier"],
+            "scale":          "0-20",
+            "polarity":       "ascending_risk",
+            "distress_probability": result["distress_probability"],
+            "scored_at":      result["scored_at"],
             "data_freshness_hours": result.get("data_freshness_hours"),
+            "stale_data":     result.get("stale_data", False),
         },
         signals=signals,
         warnings=warnings,
     )
-
-
-def _score_with_live_fallback(orgnr_or_name: str) -> dict:
-    """Try live DB scorer first; fall back to mock if DB unavailable."""
-    try:
-        from ingestion.db import Session
-        from scoring.kreditvakt import score_from_db
-        db = Session()
-        try:
-            return score_from_db(db, orgnr_or_name)
-        finally:
-            db.close()
-    except Exception:
-        # DB not available or company is a name lookup — use mock
-        from tools.kreditvakt_engine import score_company
-        r = score_company(orgnr_or_name)
-        if "error" not in r:
-            r["score_source"] = "mock"
-            r["scored_at"] = datetime.now(timezone.utc).isoformat()
-            r["data_freshness_hours"] = None
-            r["stale_data"] = True
-            r["distress_probability"] = round(r.get("insolvency_score", 0) / 100, 4)
-            r["risk_band"] = max(1, min(5, r.get("insolvency_score", 0) // 20 + 1))
-            r["last_displayed_band"] = None
-        return r
 
 
 @mcp.tool(
@@ -544,66 +554,66 @@ async def kreditvakt_batch_score(
     Args:
         orgnrs: List of Swedish organisation numbers (max 500).
                 Each accepts format with or without dash.
-    """
-    from tools.kreditvakt_engine import score_company
 
+    NO MOCK FALLBACK. Each orgnr is routed through score_from_db. Orgnrs
+    that fail validation, are not in norric_entities, or have no signals
+    appear in the per-entry response with explicit error / no_signals markers.
+    """
     if len(orgnrs) > 500:
         raise ValueError("batch_score accepts maximum 500 orgnrs per call.")
 
-    validated = []
-    errors = []
-    for o in orgnrs:
-        try:
-            validated.append(validate_orgnr(o))
-        except ValueError as e:
-            errors.append({"orgnr": o, "error": str(e)})
-
     entries = []
-    tier_counts = {"low": 0, "watch": 0, "elevated": 0, "high": 0, "critical": 0}
+    tier_counts = {"healthy": 0, "watch": 0, "elevated": 0, "high": 0, "critical": 0}
+    risk_score_sum = 0
+    risk_score_count = 0
     total_skuld_at_risk = 0
-    score_sum = 0
+    invalid_entries: list[dict] = []
+    not_ingested: list[dict] = []
 
-    from scoring.display import to_display
-
-    for orgnr in validated:
-        r = score_company(orgnr)
-        if "error" in r:
+    for orgnr in orgnrs:
+        outcome = _score_orgnr_via_db(orgnr)
+        if not outcome["ok"]:
+            if outcome["kind"] == "invalid_orgnr":
+                invalid_entries.append({"orgnr": outcome["orgnr"], "error": outcome["message"]})
+            elif outcome["kind"] == "orgnr_not_ingested":
+                not_ingested.append({"orgnr": outcome["orgnr"]})
+            else:  # scoring_error
+                entries.append({
+                    "orgnr": outcome["orgnr"],
+                    "error": outcome["message"],
+                })
             continue
-        p = round(r.get("insolvency_score", 0) / 100, 4)
-        ds, _ = to_display(p)
-        score_sum += ds.display_score
-        band = ds.band
-        if band == 1:
-            tier = "low"
-        elif band == 2:
-            tier = "watch"
-        elif band == 3:
-            tier = "elevated"
-        elif band == 4:
-            tier = "high"
-        else:
-            tier = "critical"
-        tier_counts[tier] += 1
-        if band >= 3:
-            total_skuld_at_risk += r.get("skuld_sek", 0) or 0
+
+        result = outcome["result"]
+        entity = outcome["entity"]
+        risk_tier = result.get("risk_tier")
+        risk_band = result.get("risk_band")
+        risk_score = result.get("risk_score")
+
+        if risk_tier is not None:
+            tier_counts[risk_tier.lower()] = tier_counts.get(risk_tier.lower(), 0) + 1
+        if risk_score is not None:
+            risk_score_sum += risk_score
+            risk_score_count += 1
+        if risk_band is not None and risk_band >= 3:
+            total_skuld_at_risk += result.get("skuld_sek", 0) or 0
+
         entries.append({
-            "orgnr":         r["orgnr"],
-            "company_name":  r["company_name"],
-            "display_score": ds.display_score,
-            "band":          ds.band,
-            "band_label":    ds.band_label,
-            "tier":          tier,
-            "verdict":       r["verdict"],
-            "skuld_sek":     r["skuld_sek"],
-            "konkurs_filed": r["konkurs_filed"],
-            "signal_count":  r["signal_count"],
-            # deprecated
-            "score":         r["insolvency_score"],
+            "orgnr":        result["orgnr"],
+            "name":         entity["name"],
+            "score_source": result["score_source"],
+            "risk_score":   risk_score,
+            "risk_band":    risk_band,
+            "risk_tier":    risk_tier,
+            "scale":        "0-20",
+            "polarity":     "ascending_risk",
+            "skuld_sek":    result.get("skuld_sek"),
+            "konkurs_filed": result.get("bolagsverket_petition", False),
+            "signals_fired": result.get("signals_fired", 0),
         })
 
-    total = len(entries)
-
-    def pct(n: int) -> float:
+    def pct(n: int) -> int:
+        total = sum(tier_counts.values())
         return round(n / total * 100, 1) if total else 0.0
 
     return wrap(
@@ -612,17 +622,21 @@ async def kreditvakt_batch_score(
         confidence=0.85,
         ttl=1_800,
         data={
-            "total_requested": len(orgnrs),
-            "total_valid":     len(validated),
-            "total_invalid":   len(errors),
-            "invalid_entries": errors,
+            "total_requested":   len(orgnrs),
+            "total_scored":      len(entries),
+            "total_invalid":     len(invalid_entries),
+            "total_not_ingested": len(not_ingested),
+            "invalid_entries":   invalid_entries,
+            "not_ingested":      not_ingested,
+            "scale":             "0-20",
+            "polarity":          "ascending_risk",
             "portfolio_risk_summary": {
-                "low_pct":               pct(tier_counts["low"]),
-                "watch_pct":             pct(tier_counts["watch"]),
-                "elevated_risk_pct":     pct(tier_counts["elevated"]),
-                "high_risk_pct":         pct(tier_counts["high"]),
-                "critical_pct":          pct(tier_counts["critical"]),
-                "weighted_avg_display_score": round(score_sum / total, 1) if total else 0.0,
+                "healthy_pct":         pct(tier_counts["healthy"]),
+                "watch_pct":           pct(tier_counts["watch"]),
+                "elevated_pct":        pct(tier_counts["elevated"]),
+                "high_pct":            pct(tier_counts["high"]),
+                "critical_pct":        pct(tier_counts["critical"]),
+                "weighted_avg_risk_score": round(risk_score_sum / risk_score_count, 1) if risk_score_count else None,
                 "estimated_at_risk_sek": total_skuld_at_risk,
             },
             "entries": entries,
@@ -644,31 +658,45 @@ async def kreditvakt_debt_signals(
     orgnr: str,
 ) -> dict:
     """
-    Get Skatteverket restanslängd debt data for a company.
+    Get Skatteverket / Kronofogden debt signal data for a company.
 
     Args:
         orgnr: Swedish organisation number
-    """
-    from tools.kreditvakt_engine import score_company
-    orgnr = validate_orgnr(orgnr)
-    r = score_company(orgnr)
 
+    NO MOCK FALLBACK. Returns only fields backed by real ingestion. Fields
+    removed (no live data source today): skatteverket_published flag,
+    skuld_published_date, kronofogden_escalated, f_skatt_active. These
+    return when the corresponding ingestion pipelines land.
+    """
+    outcome = _score_orgnr_via_db(orgnr)
+    if not outcome["ok"]:
+        return wrap(
+            tool="kreditvakt_debt_signals_v1",
+            source=[], confidence=0.0, ttl=0,
+            data={"orgnr": outcome["orgnr"], "error": outcome["kind"], "message": outcome["message"]},
+            warnings=[outcome["kind"]],
+        )
+
+    result = outcome["result"]
+    entity = outcome["entity"]
     return wrap(
         tool="kreditvakt_debt_signals_v1",
         source=["skatteverket", "kronofogden"],
         confidence=0.88,
         ttl=86_400,
         data={
-            "orgnr":                   r["orgnr"],
-            "company_name":            r["company_name"],
-            "skuld_sek":               r["skuld_sek"],
-            "skatteverket_published":  r["skatteverket_published"],
-            "skuld_published_date":    r["skuld_published_date"],
-            "betalning_count":         r["betalning_count"],
-            "betalning_total_sek":     r["betalning_total_sek"],
-            "betalning_latest_date":   r["betalning_latest_date"],
-            "kronofogden_escalated":   r["kronofogden_escalated"],
-            "f_skatt_active":          r["f_skatt_active"],
+            "orgnr":                  result["orgnr"],
+            "name":                   entity["name"],
+            "score_source":           result["score_source"],
+            "skuld_sek":              result.get("skuld_sek"),
+            "skatteverket_flag":      result.get("skatteverket_flag", False),
+            "kronofogden_count_6mo":  result.get("kronofogden_count_6mo", 0),
+            "kronofogden_total_sek":  result.get("kronofogden_total_sek", 0),
+            "kronofogden_latest_date": result.get("kronofogden_latest_date"),
+            "kronofogden_recency_days": result.get("kronofogden_recency_days"),
+            "scored_at":              result.get("scored_at"),
+            "data_freshness_hours":   result.get("data_freshness_hours"),
+            "stale_data":             result.get("stale_data", False),
         },
     )
 
@@ -686,14 +714,27 @@ async def kreditvakt_bankruptcy_status(
     orgnr: str,
 ) -> dict:
     """
-    Get Bolagsverket konkurs status for a company.
+    Get Bolagsverket konkurs (bankruptcy) filing status for a company.
 
     Args:
         orgnr: Swedish organisation number
+
+    NO MOCK FALLBACK. Fields removed (had no real data source): arende_*
+    pending-case fields, f_skatt_active. They return when those ingestion
+    pipelines land.
     """
-    from tools.kreditvakt_engine import score_company
-    orgnr = validate_orgnr(orgnr)
-    r = score_company(orgnr)
+    outcome = _score_orgnr_via_db(orgnr)
+    if not outcome["ok"]:
+        return wrap(
+            tool="kreditvakt_bankruptcy_status_v1",
+            source=[], confidence=0.0, ttl=0,
+            data={"orgnr": outcome["orgnr"], "error": outcome["kind"], "message": outcome["message"]},
+            warnings=[outcome["kind"]],
+        )
+
+    result = outcome["result"]
+    entity = outcome["entity"]
+    konkurs_filed = bool(result.get("bolagsverket_petition", False))
 
     return wrap(
         tool="kreditvakt_bankruptcy_status_v1",
@@ -701,17 +742,14 @@ async def kreditvakt_bankruptcy_status(
         confidence=0.95,
         ttl=21_600,
         data={
-            "orgnr":                   r["orgnr"],
-            "company_name":            r["company_name"],
-            "konkurs_filed":           r["konkurs_filed"],
-            "konkurs_date":            r["konkurs_date"],
-            "arende_ankommet_datum":   r["arende_ankommet_datum"],
-            "arende_kanal":            r["arende_kanal"],
-            "arende_total_avgift_sek": r["arende_total_avgift_sek"],
-            "arende_betalt_belopp_sek":r["arende_betalt_belopp_sek"],
-            "arende_obetald":          r["arende_obetald"],
-            "company_active":          not r["konkurs_filed"],
-            "f_skatt_active":          r["f_skatt_active"],
+            "orgnr":              result["orgnr"],
+            "name":               entity["name"],
+            "score_source":       result["score_source"],
+            "konkurs_filed":      konkurs_filed,
+            "company_active":     entity["status"] != "deregistered" and not konkurs_filed,
+            "entity_status":      entity["status"],
+            "deregistered_at":    entity["deregistered_at"],
+            "scored_at":          result.get("scored_at"),
         },
     )
 
@@ -1141,44 +1179,51 @@ async def norric_company_profile(
 
     Args:
         orgnr: Swedish organisation number
-    """
-    from tools.kreditvakt_engine import score_company
-    from scoring.display import to_display
-    orgnr = validate_orgnr(orgnr)
-    r = score_company(orgnr)
 
-    p = round(r.get("insolvency_score", 0) / 100, 4)
-    ds, _ = to_display(p)
+    NO MOCK FALLBACK. Returns canonical risk family + entity status only.
+    Fields removed (had no real data source): industry, org_age_years,
+    registered_year, verdict. They return when entity-enrichment ingestion
+    is wired.
+    """
+    outcome = _score_orgnr_via_db(orgnr)
+    if not outcome["ok"]:
+        return wrap(
+            tool="norric_company_profile_v1",
+            source=[], confidence=0.0, ttl=0,
+            data={"orgnr": outcome["orgnr"], "error": outcome["kind"], "message": outcome["message"]},
+            warnings=[outcome["kind"]],
+        )
+
+    result = outcome["result"]
+    entity = outcome["entity"]
+    p = result.get("distress_probability")
+    confidence_num = round(max(0.0, 1.0 - p), 2) if p is not None else 0.0
 
     return wrap(
         tool="norric_company_profile_v1",
         source=["skatteverket", "kronofogden", "bolagsverket"],
-        confidence=round(max(0.0, 1.0 - p), 2),
+        confidence=confidence_num,
         ttl=3_600,
         data={
-            "orgnr":              r["orgnr"],
-            "company_name":       r["company_name"],
-            "industry":           r["industry"],
-            "org_age_years":      r["org_age_years"],
-            "registered_year":    r["registered_year"],
-            # v2.1 display fields
-            "display_score":      ds.display_score,
-            "band":               ds.band,
-            "band_label":         ds.band_label,
-            "band_action":        ds.band_action,
-            # deprecated aliases (sunset 2027-05)
-            "insolvency_score":   r["insolvency_score"],
-            "insolvency_verdict": r["verdict"],
-            "signal_count":       r["signal_count"],
-            "confidence":         r["confidence"],
-            "f_skatt_active":     r["f_skatt_active"],
-            "konkurs_filed":      r["konkurs_filed"],
-            "skuld_sek":          r["skuld_sek"],
-            "lifecycle_stage":    None,
+            "orgnr":            result["orgnr"],
+            "name":             entity["name"],
+            "entity_status":    entity["status"],
+            "deregistered_at":  entity["deregistered_at"],
+            "score_source":     result["score_source"],
+            "risk_score":       result.get("risk_score"),
+            "risk_band":        result.get("risk_band"),
+            "risk_tier":        result.get("risk_tier"),
+            "scale":            "0-20",
+            "polarity":         "ascending_risk",
+            "distress_probability": p,
+            "konkurs_filed":    result.get("bolagsverket_petition", False),
+            "skuld_sek":        result.get("skuld_sek"),
+            "scored_at":        result.get("scored_at"),
+            "lifecycle_stage":  None,
             "ownership_velocity": None,
             "note": "Lifecycle and ownership velocity require Vigil pipeline (not yet live).",
         },
-        signals=_kreditvakt_signals(r),
+        signals=result.get("signals", []),
     )
 
 

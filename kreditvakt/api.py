@@ -18,14 +18,17 @@ Tier gating:
     X-Kreditvakt-Tier header (set by auth middleware): free|silver|guld|premium|enterprise
     Absent header → 'free' (safe default, most restricted view)
 
-Score display convention:
-    Boundaries are lower-inclusive / upper-exclusive.
-    distress_probability=0.20 → band 2 (not band 1).
-    See scoring/display.py for full documentation.
+Canonical risk-field family (locked by docs/no-fabrication-contract.md):
+    risk_score  int|null  [0–20]                  ascending = worse
+    risk_band   int|null  [1–5]                   ascending = worse
+    risk_tier   str|null  HEALTHY|WATCH|ELEVATED|HIGH|CRITICAL
 
-Deprecated fields (sunset 2027-05):
-    insolvency_score — use display_score instead
-    risk_band        — use band instead
+Envelope metadata:
+    scale     "0-20"
+    polarity  "ascending_risk"
+
+Dropped from response (legacy / Swedish-marketing vocab — out of canonical):
+    display_score, band, band_label, band_action, confidence_label, insolvency_score
 """
 
 import hashlib
@@ -55,7 +58,16 @@ _ORGNR_RE = re.compile(r"^\d{6}-?\d{4}$")
 
 
 def _validate_orgnr(raw: str) -> str:
-    """Return normalized XXXXXX-XXXX or raise HTTPException(400)."""
+    """Return normalized XXXXXX-XXXX or raise HTTPException(400).
+
+    Rejects:
+      - Malformed: not 10 digits (with optional dash, optional century prefix).
+      - Personnummer / samordningsnummer: first 6 digits form a valid date
+        (YYMMDD with MM 01-12; DD 01-31 or 61-91 for samordningsnummer).
+        Norric Kreditvakt only scores juridiska personer; the boundary is
+        enforced mechanically here, before any DB lookup.
+      - Defensive belt-and-braces: third digit < 2 (corporate-orgnr discriminator).
+    """
     cleaned = raw.replace("-", "").replace(" ", "")
     if len(cleaned) == 12:
         cleaned = cleaned[2:]
@@ -64,6 +76,26 @@ def _validate_orgnr(raw: str) -> str:
             status_code=400,
             detail={"error_code": ErrCode.VALIDATION_FAILED, "message": customer_message(ErrCode.VALIDATION_FAILED)},
         )
+
+    # Personnummer shape: YYMMDD-XXXX where MM ∈ 01-12 and DD ∈ 01-31 or 61-91.
+    mm = int(cleaned[2:4])
+    dd = int(cleaned[4:6])
+    looks_like_date = (1 <= mm <= 12) and (1 <= dd <= 31 or 61 <= dd <= 91)
+    # Corporate orgnrs have a 3rd digit >= 2 (juridisk-person discriminator).
+    is_corporate_shape = int(cleaned[2]) >= 2
+    if looks_like_date and not is_corporate_shape:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_code": "INVALID_ORGNR",
+                "message": (
+                    "Norric Kreditvakt only scores juridiska personer (AB, HB, KB, "
+                    "ekonomiska föreningar). Personnummer and samordningsnummer are "
+                    "not supported."
+                ),
+            },
+        )
+
     return f"{cleaned[:6]}-{cleaned[6:]}"
 
 
@@ -306,10 +338,57 @@ def get_score(orgnr: str, request: Request):
                 )
             searches_remaining = limit - used
 
-    # ── Score lookup (3.3 circuit breaker wraps) ──────────────────────────────
+    # ── norric_entities membership check (404 if not in monitored universe) ──
     db = Session()
     score_err_code: Optional[ErrCode] = None
     exc_captured: Optional[BaseException] = None
+    entity: Optional[dict] = None
+    # norric_entities stores `orgnr` dashless (the canonical key) and
+    # `orgnr_display` dashed. _validate_orgnr returned the dashed form;
+    # match against orgnr_display so the lookup hits.
+    try:
+        entity_row = db.execute(
+            text("""
+                SELECT orgnr, name, is_active, deregistered_at
+                FROM norric_entities
+                WHERE orgnr_display = :orgnr
+            """),
+            {"orgnr": orgnr_normalized},
+        ).fetchone()
+    except Exception as ent_exc:
+        # norric_entities schema is wrong / table missing. NOT silently 404 —
+        # the scorer's own try/except will surface this via SCHEMA_MISSING.
+        log.warning("[%s] norric_entities lookup failed: %s", orgnr_normalized, ent_exc)
+        entity_row = None
+        try: db.rollback()
+        except Exception: pass
+
+    if entity_row is None:
+        db.close()
+        _structured_log(
+            orgnr_raw=orgnr_normalized, tier=tier,
+            latency_ms=(time.monotonic() - t0) * 1000,
+            status_code=404,
+            error_code="ORGNR_NOT_INGESTED",
+            error_message="orgnr not in norric_entities",
+        )
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error":   "orgnr_not_ingested",
+                "orgnr":   orgnr_normalized,
+                "message": "This organisation number is outside Norric's monitored universe.",
+                "hint":    "Request enrichment via /api/enrich (coming soon — contact hej@norric.io for early access).",
+            },
+        )
+
+    entity = {
+        "name":             entity_row.name,
+        "status":           "active" if entity_row.is_active else "deregistered",
+        "deregistered_at":  entity_row.deregistered_at.isoformat() if getattr(entity_row, "deregistered_at", None) else None,
+    }
+
+    # ── Score lookup (3.3 circuit breaker wraps) ──────────────────────────────
     try:
         result = score_from_db(db, orgnr_normalized)
         write_score(db, result)
@@ -340,7 +419,7 @@ def get_score(orgnr: str, request: Request):
     finally:
         db.close()
 
-    response = _enrich_response(result, request)
+    response = _enrich_response(result, request, entity=entity)
     if searches_remaining is not None:
         response["searches_remaining"] = searches_remaining
         response["searches_limit"] = _FREE_SEARCHES_LIMIT
@@ -407,7 +486,6 @@ def get_portfolio(
         raise HTTPException(status_code=403, detail="Portfolio view requires Silver tier or above")
 
     from ingestion.db import Session
-    from scoring.display import to_display
 
     db = Session()
     try:
@@ -434,17 +512,20 @@ def get_portfolio(
     finally:
         db.close()
 
+    from scoring.kreditvakt import TIER_FROM_BAND, _risk_score_from_band
+
     companies = []
     for r in rows:
         row = dict(r._mapping)
-        ds, _ = to_display(
-            row["distress_probability"],
-            last_displayed_band=row.get("last_displayed_band"),
-        )
-        row["display_score"] = ds.display_score
-        row["band"] = ds.band
-        row["band_label"] = ds.band_label
-        row["band_action"] = ds.band_action
+        rb = row.get("risk_band")
+        # Public-envelope contract: drop the legacy fields, emit the
+        # canonical risk_* family + scale/polarity metadata.
+        row.pop("insolvency_score", None)
+        row.pop("last_displayed_band", None)
+        row["risk_score"] = _risk_score_from_band(rb) if rb is not None else None
+        row["risk_tier"]  = TIER_FROM_BAND.get(rb) if rb is not None else None
+        row["scale"]      = "0-20"
+        row["polarity"]   = "ascending_risk"
         companies.append(row)
 
     return {"total": total, "limit": limit, "offset": offset, "companies": companies}
@@ -497,19 +578,19 @@ def get_alerts(request: Request, hours_back: int = Query(24, ge=1, le=168)):
     finally:
         db.close()
 
-    from scoring.display import to_display, _BAND_LABELS, _BAND_ACTIONS
+    from scoring.kreditvakt import TIER_FROM_BAND, _risk_score_from_band
 
     alerts = []
     for r in rows:
         row = dict(r._mapping)
-        ds, _ = to_display(
-            row["distress_probability"],
-            last_displayed_band=row.get("last_displayed_band"),
-        )
-        row["display_score"] = ds.display_score
-        row["band"] = ds.band
-        row["band_label"] = ds.band_label
-        row["band_action"] = ds.band_action
+        rb = row.get("risk_band")
+        # Same canonical envelope as /api/portfolio + /api/score/{orgnr}.
+        row.pop("last_displayed_band", None)
+        row["risk_score"] = _risk_score_from_band(rb) if rb is not None else None
+        row["risk_tier"]  = TIER_FROM_BAND.get(rb) if rb is not None else None
+        row["scale"]      = "0-20"
+        row["polarity"]   = "ascending_risk"
+        # prev_band stays as-is (1-5 risk_band semantics, ascending=worse).
         alerts.append(row)
 
     return {"hours_back": hours_back, "alert_count": len(alerts), "alerts": alerts}
@@ -759,47 +840,63 @@ def env_check():
 
 # ── Response helpers ───────────────────────────────────────────────────────────
 
-def _enrich_response(result: dict, request: Request) -> dict:
+def _enrich_response(result: dict, request: Request, *, entity: Optional[dict] = None) -> dict:
+    """Build the public response envelope around the scorer's result dict.
+
+    Contract (see docs/no-fabrication-contract.md):
+      - Canonical risk family: risk_score (0-20, ascending=worse), risk_band (1-5),
+        risk_tier (HEALTHY|WATCH|ELEVATED|HIGH|CRITICAL).
+      - Envelope metadata: scale='0-20', polarity='ascending_risk'.
+      - score_source ∈ {'live', 'no_signals'}. 'mock' is not a valid value.
+      - For no_signals: risk_* fields are null; ingestion_status is present.
+
+    Dropped this PR: display_score, insolvency_score, band, band_label,
+    band_action, confidence_label. Swedish-marketing strings (band_action /
+    confidence_label) and tier-label strings (band_label) all moved out of
+    the canonical envelope; SDK consumers route on risk_tier (English enum)
+    and derive any UI copy themselves until labels.sv lands.
     """
-    Add display fields to every score response.
+    is_no_signals = result.get("score_source") == "no_signals"
 
-    New fields (v2.1, additive):
-        display_score  int [0–20]
-        band           int [1–5]
-        band_label     str (Swedish)
-        band_action    str (Swedish recommended action)
+    out: dict = {
+        "orgnr":        result["orgnr"],
+        "name":         (entity or {}).get("name"),
+        "entity": {
+            "status":          (entity or {}).get("status", "active"),
+            "deregistered_at": (entity or {}).get("deregistered_at"),
+        },
+        "score_source": result["score_source"],
+        "scored_at":    result.get("scored_at"),
 
-    Deprecated fields (sunset 2027-05, kept for backwards compat):
-        insolvency_score  — use display_score
-        risk_band         — use band
+        "risk_score":   result.get("risk_score"),
+        "risk_band":    result.get("risk_band"),
+        "risk_tier":    result.get("risk_tier"),
 
-    internal_score included only for Premium+ (contains distress_probability*100).
-    """
-    from scoring.display import to_display
+        "scale":        "0-20",
+        "polarity":     "ascending_risk",
 
-    p = result.get("distress_probability", 0.0)
-    last_band = result.get("last_displayed_band")
+        "distress_probability": result.get("distress_probability"),
 
-    ds, _ = to_display(p, last_displayed_band=last_band)
+        "signals":       result.get("signals", []),
+        "signals_fired": result.get("signals_fired", 0),
+        "signals_total": result.get("signals_total", 5),
 
-    out = dict(result)
-    out["display_score"] = ds.display_score
-    out["band"] = ds.band
-    out["band_label"] = ds.band_label
-    out["band_action"] = ds.band_action
-    out["confidence_label"] = _confidence_label(result)
+        "data_freshness_hours": result.get("data_freshness_hours"),
+        "stale_data":           result.get("stale_data", False),
+    }
 
-    if not _tier_gte(request, "premium"):
-        out.pop("internal_score", None)
+    if is_no_signals:
+        out["ingestion_status"] = result.get("ingestion_status")
 
     return out
 
 
 def _confidence_label(result: dict) -> str:
+    """Internal helper retained for structured logging; no longer surfaced
+    in the public response envelope per the kill-mock PR."""
     fired = result.get("signals_fired", 0)
-    source = result.get("score_source", "live")
     stale = result.get("stale_data", False)
-    if source == "mock" or stale:
+    if stale:
         return "Tidig indikation"
     if fired >= 3:
         return "Starkt signal"
