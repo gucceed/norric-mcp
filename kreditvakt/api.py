@@ -343,12 +343,15 @@ def get_score(orgnr: str, request: Request):
     score_err_code: Optional[ErrCode] = None
     exc_captured: Optional[BaseException] = None
     entity: Optional[dict] = None
+    # norric_entities stores `orgnr` dashless (the canonical key) and
+    # `orgnr_display` dashed. _validate_orgnr returned the dashed form;
+    # match against orgnr_display so the lookup hits.
     try:
         entity_row = db.execute(
             text("""
                 SELECT orgnr, name, is_active, deregistered_at
                 FROM norric_entities
-                WHERE orgnr = :orgnr
+                WHERE orgnr_display = :orgnr
             """),
             {"orgnr": orgnr_normalized},
         ).fetchone()

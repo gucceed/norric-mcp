@@ -389,12 +389,14 @@ def _score_orgnr_via_db(orgnr: str) -> dict:
 
     db = Session()
     try:
+        # norric_entities.orgnr is dashless (canonical key); orgnr_display is dashed.
+        # validate_orgnr returned the dashed form — match against orgnr_display.
         try:
             entity_row = db.execute(
                 _text("""
                     SELECT orgnr, name, is_active, deregistered_at
                     FROM norric_entities
-                    WHERE orgnr = :orgnr
+                    WHERE orgnr_display = :orgnr
                 """),
                 {"orgnr": norm},
             ).fetchone()
