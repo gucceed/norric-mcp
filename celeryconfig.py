@@ -120,4 +120,10 @@ beat_schedule = {
         "schedule": crontab(hour=2, minute=15),
         "options": {"expires": 7200},
     },
+    # Refresh supply-chain contagion peers for HIGH/CRITICAL companies every 4h
+    "signal-refresh-contagion-4h": {
+        "task": "signal.refresh_contagion",
+        "schedule": crontab(minute=30, hour="*/4"),
+        "options": {"expires": 3600},
+    },
 }

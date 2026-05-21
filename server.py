@@ -511,25 +511,234 @@ async def kreditvakt_score_company(
 
     signals = _kreditvakt_signals(result)
 
+    # Supply-chain contagion preview — HIGH/CRITICAL only, cache-only,
+    # never blocks the score response. Any failure → score returned without preview.
+    score_data: dict = {
+        "orgnr":          result["orgnr"],
+        "score_source":   "live",
+        "risk_score":     result["risk_score"],
+        "risk_band":      result["risk_band"],
+        "risk_tier":      result["risk_tier"],
+        "scale":          "0-20",
+        "polarity":       "ascending_risk",
+        "distress_probability": result["distress_probability"],
+        "scored_at":      result["scored_at"],
+        "data_freshness_hours": result.get("data_freshness_hours"),
+        "stale_data":     result.get("stale_data", False),
+    }
+    if result.get("risk_tier") in ("HIGH", "CRITICAL"):
+        try:
+            from ingestion.db import Session as _CS
+            from kreditvakt.contagion import get_cached_contagion_peers
+            _cdb = _CS()
+            try:
+                _peers = get_cached_contagion_peers(result["orgnr"], _cdb, limit=5)
+            finally:
+                _cdb.close()
+            score_data["contagion_preview"] = {
+                "peer_count":  len(_peers),
+                "top_peers":   _peers[:3],
+                "detail_tool": "kreditvakt_contagion_v1",
+            }
+        except Exception:
+            # Score response is sacrosanct — never block on contagion lookup.
+            pass
+
     return wrap(
         tool="kreditvakt_score_company_v1",
         source=["skatteverket", "kronofogden", "bolagsverket"],
         confidence=round(confidence_num, 2),
         ttl=3_600,
-        data={
-            "orgnr":          result["orgnr"],
-            "score_source":   "live",
-            "risk_score":     result["risk_score"],
-            "risk_band":      result["risk_band"],
-            "risk_tier":      result["risk_tier"],
-            "scale":          "0-20",
-            "polarity":       "ascending_risk",
-            "distress_probability": result["distress_probability"],
-            "scored_at":      result["scored_at"],
-            "data_freshness_hours": result.get("data_freshness_hours"),
-            "stale_data":     result.get("stale_data", False),
-        },
+        data=score_data,
         signals=signals,
+        warnings=warnings,
+    )
+
+
+# ── Supply-chain contagion ─────────────────────────────────────────────────────
+
+_CONTAGION_DISCLAIMER = (
+    "Contagion peers are probabilistic based on shared procurement sector and "
+    "geographic proximity. Not verified supply chain relationships."
+)
+
+_MATCH_INTERPRETATION = {
+    "same_sector_kommunkod":
+        "Samma sektor, samma kommun. Sannolik leveranskedjeöverlappning.",
+    "same_sector_county":
+        "Samma sektor, samma län. Möjlig leveranskedjeöverlappning.",
+}
+
+
+@mcp.tool(
+    name="kreditvakt_contagion_v1",
+    description=(
+        "Supply-chain contagion analysis for a HIGH or CRITICAL Swedish company. "
+        "Returns the companies most likely to have supply-chain exposure to the "
+        "given company, based on shared procurement sector and geographic "
+        "proximity (kommunkod → county fallback). "
+        "Use after identifying a HIGH/CRITICAL company via kreditvakt_score_company_v1. "
+        "Reads from the contagion_peers cache (refreshed every 4h); recomputes on "
+        "cache miss. Always returns the probabilistic disclaimer in warnings — "
+        "these are likely relationships, not verified supply chains. "
+        "orgnr accepts format with or without dash. limit defaults to 10, max 25."
+    ),
+)
+async def kreditvakt_contagion(
+    orgnr: str,
+    limit: int = 10,
+) -> dict:
+    """Supply-chain contagion peers for a HIGH or CRITICAL company.
+
+    Args:
+        orgnr: Swedish organisation number (e.g. 556000-1234).
+        limit: max peers to return (default 10, max 25).
+    """
+    from ingestion.db import Session
+    from sqlalchemy import text as _sql_text
+    from kreditvakt.contagion import (
+        compute_contagion_peers,
+        get_cached_contagion_peers,
+        persist_contagion_peers,
+        TIER_FROM_BAND,
+        SCORE_FROM_BAND,
+        CONTAGION_BANDS,
+    )
+
+    # Normalize orgnr (raise-free; fall through with a warning if invalid).
+    try:
+        orgnr_norm = validate_orgnr(orgnr)
+    except ValueError as exc:
+        return wrap(
+            tool="kreditvakt_contagion_v1",
+            source=[],
+            confidence=0.0,
+            ttl=0,
+            data={},
+            warnings=[f"validation_failed: {exc}", _CONTAGION_DISCLAIMER],
+        )
+
+    limit_clamped = max(1, min(int(limit), 25))
+
+    db = Session()
+    try:
+        # 1. Look up source: must exist in norric_entities AND have a HIGH/CRITICAL score.
+        src = db.execute(_sql_text("""
+            SELECT
+                ne.orgnr_display AS orgnr,
+                ne.name,
+                cs.risk_band
+            FROM norric_entities ne
+            LEFT JOIN company_scores cs ON cs.orgnr = ne.orgnr_display
+            WHERE ne.orgnr_display = :orgnr
+            LIMIT 1
+        """), {"orgnr": orgnr_norm}).fetchone()
+
+        if src is None:
+            return wrap(
+                tool="kreditvakt_contagion_v1",
+                source=["norric_entities"],
+                confidence=0.0,
+                ttl=3_600,
+                data={"orgnr": orgnr_norm},
+                warnings=[
+                    "orgnr_not_ingested: not in norric_entities",
+                    _CONTAGION_DISCLAIMER,
+                ],
+            )
+
+        band = src.risk_band
+        if band is None or band not in CONTAGION_BANDS:
+            return wrap(
+                tool="kreditvakt_contagion_v1",
+                source=["norric_entities", "company_scores"],
+                confidence=0.0,
+                ttl=3_600,
+                data={
+                    "source": {
+                        "orgnr":    src.orgnr,
+                        "name":     src.name,
+                        "tier":     TIER_FROM_BAND.get(band) if band else None,
+                        "kv_score": SCORE_FROM_BAND.get(band) if band else None,
+                    },
+                    "contagion_peers": [],
+                    "peer_count": 0,
+                },
+                warnings=[
+                    "tier_below_contagion_threshold: contagion analysis only "
+                    "applies to HIGH (band 4) and CRITICAL (band 5)",
+                    _CONTAGION_DISCLAIMER,
+                ],
+            )
+
+        tier = TIER_FROM_BAND[band]
+
+        # 2. Cache-first read.
+        peers = get_cached_contagion_peers(orgnr_norm, db, limit=limit_clamped)
+        cache_hit = bool(peers)
+
+        # 3. Compute + persist on miss.
+        if not peers:
+            peers = compute_contagion_peers(orgnr_norm, tier, db, limit=limit_clamped)
+            if peers:
+                try:
+                    persist_contagion_peers(db, orgnr_norm, tier, peers)
+                    db.commit()
+                except Exception as persist_exc:
+                    db.rollback()
+                    log_warn = f"persist_failed: {type(persist_exc).__name__}"
+                    # Persist failure does not block returning the freshly computed peers.
+                    peers_warn = [log_warn]
+                else:
+                    peers_warn = []
+            else:
+                peers_warn = []
+        else:
+            peers_warn = []
+
+    finally:
+        db.close()
+
+    # Attach Swedish interpretation strings + figure confidence.
+    enriched = [
+        {**p, "interpretation": _MATCH_INTERPRETATION.get(p["match_reason"], "")}
+        for p in peers
+    ]
+
+    has_kommunkod_match = any(p["match_reason"] == "same_sector_kommunkod" for p in peers)
+    confidence_label = (
+        "medium" if peers and has_kommunkod_match
+        else "low"  if peers
+        else "none"
+    )
+    confidence_num = {"medium": 0.5, "low": 0.3, "none": 0.0}[confidence_label]
+
+    warnings = [_CONTAGION_DISCLAIMER] + peers_warn
+    if not peers:
+        warnings.append(
+            "no_peers: no peers derivable — source may have no procurement "
+            "history (sector unknown) or no scored companies in same kommunkod/county"
+        )
+
+    return wrap(
+        tool="kreditvakt_contagion_v1",
+        source=["norric_entities", "company_scores", "signal_contracts", "contagion_peers"],
+        confidence=confidence_num,
+        ttl=14_400,  # 4h — matches refresh cadence
+        data={
+            "source": {
+                "orgnr":    src.orgnr,
+                "name":     src.name,
+                "tier":     tier,
+                "kv_score": SCORE_FROM_BAND[band],
+            },
+            "contagion_peers":  enriched,
+            "peer_count":       len(enriched),
+            "confidence_label": confidence_label,
+            "cache_hit":        cache_hit,
+            "scale":            "0-20",
+            "polarity":         "ascending_risk",
+        },
         warnings=warnings,
     )
 
