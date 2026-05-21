@@ -1506,6 +1506,236 @@ async def norric_status() -> dict:
 from tools.provenance_tools import register_provenance_tools
 register_provenance_tools(mcp)
 
+
+# ── Norric Intelligence (cross-product) ────────────────────────────────────────
+# Composes Kreditvakt scoring + SIGNAL procurement + contagion cache + map
+# anchors into single-call payloads sized for the intelligence dashboard.
+
+import logging as _intel_logging  # noqa: E402
+
+log = _intel_logging.getLogger(__name__)
+
+
+@mcp.tool(
+    name="norric_score_v1",
+    description=(
+        "Full intelligence package for a Swedish company: identity + geography "
+        "(with lat/lng), risk score (band/tier/percentile/delta_7d/trajectory), "
+        "decomposed signal flags (restanslängd, betalningsförelägganden, "
+        "konkursansökan, F-skatt), insolvency timeline (onset date, days "
+        "elapsed/remaining vs ~210-day median), supply-chain contagion preview, "
+        "and active SIGNAL contracts. Single round-trip payload for the "
+        "intelligence dashboard score card. Returns null for risk_* fields "
+        "when score_source='no_signals'. Accepts orgnr with or without dash."
+    ),
+)
+async def norric_score(orgnr: str) -> dict:
+    """Full intelligence package for a single company.
+
+    Args:
+        orgnr: Swedish organisation number (e.g. 556000-1234).
+    """
+    from ingestion.db import Session
+    from scoring.kreditvakt import score_from_db
+    from kreditvakt.intelligence import build_score_intelligence, MODEL_VERSION
+
+    try:
+        orgnr_norm = validate_orgnr(orgnr)
+    except ValueError as exc:
+        return wrap(
+            tool="norric_score_v1",
+            source=[],
+            confidence=0.0,
+            ttl=0,
+            data={},
+            warnings=[f"validation_failed: {exc}"],
+        )
+
+    db = Session()
+    try:
+        result = score_from_db(db, orgnr_norm)
+        package = build_score_intelligence(db, orgnr_norm, result)
+    except Exception as exc:
+        log.error("norric_score_v1[%s] failed: %s", orgnr_norm, exc, exc_info=True)
+        db.close()
+        return wrap(
+            tool="norric_score_v1",
+            source=[],
+            confidence=0.0,
+            ttl=0,
+            data={"orgnr": orgnr_norm},
+            warnings=[f"scoring_error: {type(exc).__name__}"],
+        )
+    finally:
+        try: db.close()
+        except Exception: pass
+
+    distress = result.get("distress_probability")
+    confidence = max(0.0, 1.0 - distress) if distress is not None else 0.0
+    warnings = []
+    if result.get("stale_data"):
+        warnings.append(
+            f"Data freshness {result.get('data_freshness_hours', '?')}h — exceeds 48h threshold"
+        )
+    if package["company"]["sector"] is None:
+        warnings.append("no_procurement_history: sector cannot be derived")
+    if package["company"]["lat"] is None:
+        warnings.append("no_geo_anchor: municipality coordinates unavailable")
+
+    return wrap(
+        tool="norric_score_v1",
+        source=[
+            "skatteverket", "kronofogden", "bolagsverket",
+            "norric_entities", "company_scores", "company_score_history",
+            "signal_contracts", "contagion_peers", "municipalities",
+        ],
+        confidence=round(confidence, 2),
+        ttl=900,  # 15min — matches Celery rescore cadence
+        data=package,
+        warnings=warnings,
+    )
+
+
+@mcp.tool(
+    name="norric_search_v1",
+    description=(
+        "Search the Norric monitored universe by organisation number prefix or "
+        "company name prefix. Returns each match with its current risk score / "
+        "band / tier when available. Use to resolve a typed query in the "
+        "dashboard search bar to a concrete orgnr before calling norric_score_v1. "
+        "Heuristic: if the query is digits + dashes, prefix-match orgnr_display; "
+        "otherwise prefix-match name (case-insensitive). limit defaults to 10, max 50."
+    ),
+)
+async def norric_search(q: str, limit: int = 10) -> dict:
+    """Search norric_entities by orgnr prefix or name prefix.
+
+    Args:
+        q: query string (orgnr prefix or company-name prefix).
+        limit: max results (default 10, max 50).
+    """
+    from ingestion.db import Session
+    from kreditvakt.intelligence import search_entities
+
+    q_stripped = (q or "").strip()
+    if not q_stripped:
+        return wrap(
+            tool="norric_search_v1",
+            source=["norric_entities"],
+            confidence=0.0,
+            ttl=0,
+            data={"query": "", "results": [], "result_count": 0},
+            warnings=["empty_query"],
+        )
+
+    db = Session()
+    try:
+        results = search_entities(db, q_stripped, limit=limit)
+    except Exception as exc:
+        log.error("norric_search_v1 failed: %s", exc, exc_info=True)
+        return wrap(
+            tool="norric_search_v1",
+            source=["norric_entities"],
+            confidence=0.0,
+            ttl=0,
+            data={"query": q_stripped, "results": [], "result_count": 0},
+            warnings=[f"search_error: {type(exc).__name__}"],
+        )
+    finally:
+        db.close()
+
+    return wrap(
+        tool="norric_search_v1",
+        source=["norric_entities", "company_scores"],
+        confidence=1.0 if results else 0.0,
+        ttl=300,
+        data={
+            "query":        q_stripped,
+            "results":      results,
+            "result_count": len(results),
+        },
+        warnings=[] if results else ["no_matches"],
+    )
+
+
+@mcp.tool(
+    name="norric_contagion_map_v1",
+    description=(
+        "Supply-chain blast-radius shape for a HIGH or CRITICAL company, sized "
+        "for the dashboard visualisation. Returns source company (with lat/lng), "
+        "concentric rings of peers grouped by match_reason (same_sector_kommunkod "
+        "= ring 1, same_sector_county = ring 2), each peer enriched with its own "
+        "lat/lng and risk score, plus an aggregate summary. Reads the cached "
+        "contagion_peers table (refreshed every 4h). Empty rings when no peers "
+        "exist — caller should fall back to a non-spatial view. Same disclaimer "
+        "as kreditvakt_contagion_v1: peers are probabilistic, not verified."
+    ),
+)
+async def norric_contagion_map(orgnr: str) -> dict:
+    """Blast-radius shape with geographic anchors for visualisation.
+
+    Args:
+        orgnr: Swedish organisation number (e.g. 556000-1234).
+    """
+    from ingestion.db import Session
+    from kreditvakt.intelligence import build_contagion_map
+
+    try:
+        orgnr_norm = validate_orgnr(orgnr)
+    except ValueError as exc:
+        return wrap(
+            tool="norric_contagion_map_v1",
+            source=[],
+            confidence=0.0,
+            ttl=0,
+            data={},
+            warnings=[f"validation_failed: {exc}"],
+        )
+
+    db = Session()
+    try:
+        m = build_contagion_map(db, orgnr_norm)
+    except Exception as exc:
+        log.error("norric_contagion_map_v1[%s] failed: %s", orgnr_norm, exc, exc_info=True)
+        return wrap(
+            tool="norric_contagion_map_v1",
+            source=[],
+            confidence=0.0,
+            ttl=0,
+            data={"orgnr": orgnr_norm},
+            warnings=[f"contagion_map_error: {type(exc).__name__}"],
+        )
+    finally:
+        db.close()
+
+    warnings = [
+        "Contagion peers are probabilistic based on shared procurement sector "
+        "and geographic proximity. Not verified supply chain relationships.",
+    ]
+    if m.get("warning") == "orgnr_not_ingested":
+        warnings.append("orgnr_not_ingested: not in norric_entities")
+    if m["summary"]["total_peers"] == 0:
+        warnings.append(
+            "no_peers: source has no procurement history (sector unknown) "
+            "or no scored companies in same kommunkod/county"
+        )
+
+    confidence = (
+        0.5 if any(r["ring"] == 1 for r in m["rings"])
+        else 0.3 if m["rings"]
+        else 0.0
+    )
+
+    return wrap(
+        tool="norric_contagion_map_v1",
+        source=["contagion_peers", "norric_entities", "municipalities", "company_scores"],
+        confidence=confidence,
+        ttl=14_400,
+        data=m,
+        warnings=warnings,
+    )
+
+
 # ── Auth setup ─────────────────────────────────────────────────────────────────
 import logging
 
