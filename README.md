@@ -12,15 +12,33 @@ Sweden's B2B intelligence infrastructure — exposed as a single MCP server.
 
 ## Authentication
 
-Every tool call requires an API key. The initialize handshake is open (no key needed for that step).
+**Every** request to `/mcp` requires an API key — including the `initialize`
+handshake. Anonymous discovery is not supported.
+
+Send the key in one of two headers (server accepts both; `Authorization` wins
+when both are present):
+
+```
+X-Norric-Key:  <key>
+Authorization: Bearer <key>
+```
+
+Working curl against the initialize endpoint:
 
 ```bash
-# Option 1 — Authorization header
-Authorization: Bearer nrc_your_api_key
-
-# Option 2 — Norric header
-X-Norric-Key: nrc_your_api_key
+curl -si https://mcp.norric.io/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "X-Norric-Key: nrc_your_api_key" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize",
+       "params":{"protocolVersion":"2025-03-26","capabilities":{},
+                 "clientInfo":{"name":"my-client","version":"1"}}}'
+# → HTTP/1.1 200 OK
+# → mcp-session-id: <id>     (use this header on subsequent calls in the session)
 ```
+
+Missing key returns `401 {"error": "Missing API key…"}`.
+Wrong key returns `401 {"error": "Invalid API key…"}`.
 
 **Get a key:** https://norric.io/api
 

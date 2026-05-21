@@ -1315,9 +1315,11 @@ _OPTIONAL_AUTH_PREFIX = "/api/score/"
 
 class _NorricAuthMiddleware:
     """
-    Pure-ASGI Bearer token middleware.
+    Pure-ASGI auth middleware. Reads `X-Norric-Key` OR `Authorization: Bearer`
+    (Bearer wins when both are sent — backwards-compatible with existing clients).
 
     Validation order (first match wins):
+      0. NORRIC_MASTER_KEY_HASH — single argon2-verified admin key (core/auth.py)
       1. NORRIC_API_KEYS env var — plain-key list, no DB/Redis (admin / test keys)
       2. Redis cache  — api_key:{sha256} → "valid:{tier}" | "revoked"
       3. DB lookup    — api_keys table, status='active'
@@ -1344,7 +1346,17 @@ class _NorricAuthMiddleware:
 
         headers  = dict(scope.get("headers", []))
         raw_auth = headers.get(b"authorization", b"").decode()
-        has_key  = raw_auth.startswith("Bearer ")
+        raw_xkey = headers.get(b"x-norric-key", b"").decode().strip()
+
+        # Resolve the presented key. Authorization: Bearer wins when both
+        # headers are sent; otherwise X-Norric-Key. Docstring at server.py:18
+        # has promised both shapes since 2026-05; this is the line that makes
+        # it true.
+        if raw_auth.startswith("Bearer "):
+            key = raw_auth.removeprefix("Bearer ").strip()
+        else:
+            key = raw_xkey
+        has_key = bool(key)
 
         # Optional-auth scoring paths: no key → anonymous free tier
         if path.startswith(_OPTIONAL_AUTH_PREFIX) and not has_key:
@@ -1363,7 +1375,13 @@ class _NorricAuthMiddleware:
             await resp(scope, receive, send)
             return
 
-        key = raw_auth.removeprefix("Bearer ").strip()
+        # ── 0. Master-key fast-path (argon2, no DB/Redis) ─────────────────────
+        from core.auth import verify_master_key
+        if verify_master_key(key):
+            scope["norric_tier"]        = "all"
+            scope["norric_auth_source"] = "master"
+            await self.app(scope, receive, send)
+            return
 
         # ── 1. Env var escape hatch (fast path, no DB/Redis) ──────────────────
         if key in _VALID_KEYS:
