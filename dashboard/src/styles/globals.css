@@ -1,0 +1,181 @@
+/* Norric Intelligence — design tokens + base styles
+ *
+ * Refined Institutional Dark. Warm-black ground, sand text, three signal
+ * accents (teal/amber/red), gold for CRITICAL numerals. Fraunces for display,
+ * DM Mono for data, Syne for UI labels.
+ */
+
+:root {
+  /* Surface */
+  --void:        #080807;
+  --ink:         #0D0D0C;
+  --ink-2:       #141413;
+  --ink-3:       #1C1C1A;
+  --surface:     #242422;
+
+  /* Border */
+  --border:      rgba(242, 237, 228, 0.08);
+  --border-2:    rgba(242, 237, 228, 0.14);
+  --border-3:    rgba(242, 237, 228, 0.20);
+
+  /* Text */
+  --sand:        #F2EDE4;
+  --sand-2:      #CFC4B4;
+  --muted:       #888780;
+  --muted-2:     #5F5E58;
+
+  /* Signal */
+  --teal:        #1D9E75;
+  --teal-m:      #5DCAA5;
+  --teal-l:      rgba(29, 158, 117, 0.10);
+
+  --amber:       #EF9F27;
+  --amber-l:     rgba(239, 159, 39, 0.10);
+
+  --red:         #E24B4A;
+  --red-pulse:   rgba(226, 75, 74, 0.20);
+  --red-l:       rgba(226, 75, 74, 0.08);
+
+  --gold:        #C9A84C;
+
+  /* Type */
+  --font-display: 'Fraunces', 'Times New Roman', serif;
+  --font-mono:    'DM Mono', 'JetBrains Mono', ui-monospace, monospace;
+  --font-ui:      'Syne', 'Inter', system-ui, sans-serif;
+
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  background: var(--void);
+  color: var(--sand);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+#root {
+  isolation: isolate;
+}
+
+body {
+  letter-spacing: 0.01em;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+button:focus-visible,
+input:focus-visible,
+a:focus-visible {
+  outline: 1px solid var(--sand-2);
+  outline-offset: 2px;
+}
+
+input {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: none;
+}
+input:focus { outline: none; }
+
+::selection {
+  background: var(--sand);
+  color: var(--void);
+}
+
+/* Utility classes used across components ────────────────────────────── */
+
+.font-display { font-family: var(--font-display); }
+.font-mono    { font-family: var(--font-mono); }
+.font-ui      { font-family: var(--font-ui); }
+
+.uppercase-label {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.divider {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 0;
+}
+
+/* Tier chip ─────────────────────────────────────────────────────────── */
+
+.tier-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 2px;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-weight: 600;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+.tier-chip .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* Reduced motion ────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Leaflet dark-tile overrides — strip the default light borders so the
+   CartoDB Dark Matter tiles blend with --void underneath. */
+.leaflet-container {
+  background: var(--void) !important;
+  outline: none;
+}
+.leaflet-control-attribution {
+  background: rgba(13, 13, 12, 0.7) !important;
+  color: var(--muted) !important;
+  font-family: var(--font-mono) !important;
+  font-size: 9px !important;
+}
+.leaflet-control-attribution a { color: var(--sand-2) !important; }
