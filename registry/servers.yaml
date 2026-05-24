@@ -43,6 +43,7 @@ servers:
     status: live
     free_tier_tools:
       - norric_status_v1
+      - norric_data_freshness_v1
     paid_tier_tools:
       - kreditvakt_score_company_v1
       - kreditvakt_batch_score_v1
@@ -59,10 +60,11 @@ servers:
       - sigvik_score_brf_v1
       - sigvik_brf_avgift_v1
       - sigvik_brf_flags_v1
+      - siteloop_pipeline_status_v1
+      - siteloop_submit_lead_v1
       - norric_company_profile_v1
       - norric_explain_score_v1
-      - norric_data_freshness_v1
-    tool_count: 19
+    tool_count: 21
     quick_start: |
       claude mcp add norric https://mcp.norric.io/mcp \
         --header "Authorization: Bearer nrk_your_api_key"

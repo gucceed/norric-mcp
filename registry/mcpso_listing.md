@@ -16,7 +16,7 @@ Kronofogden, Boverket, and Lantmäteriet.
 
 | Tool | Description |
 |------|-------------|
-| `kreditvakt_score_company_v1` | 12-month insolvency probability for any Swedish aktiebolag |
+| `kreditvakt_score_company_v1` | risk_score (0–20, ascending=worse) + risk_band (1–5) + risk_tier (HEALTHY…CRITICAL) for any Swedish aktiebolag |
 | `kreditvakt_batch_score_v1` | Score up to 500 companies in one call |
 | `kreditvakt_debt_signals_v1` | Skatteverket tax debt and F-skatt status |
 | `kreditvakt_bankruptcy_status_v1` | Bolagsverket konkurs filing status |
@@ -42,13 +42,18 @@ Kronofogden, Boverket, and Lantmäteriet.
 
 | Tier | Tools | Daily limit | Price |
 |------|-------|-------------|-------|
-| **Free** | Status + explain tools | 100 calls/day | Free |
-| **Standard** | All 21 tools | 10,000 calls/day | 2,900 SEK/month |
-| **Compliance** | All 21 tools + audit rights | Unlimited | 9,900 SEK/month |
+| **Free** | `norric_status_v1`, `norric_data_freshness_v1` | 100 calls/day | Free |
+| **Standard** | All product tools | 10,000 calls/day | Contact |
+| **Compliance** | Standard + `norric_explain_score_v1` (EU AI Act provenance) | Unlimited | Contact |
+
+Standard and Compliance tiers are issued direct via `hej@norric.io` — public self-serve
+for paid tiers is paused pending kreditupplysningslagen (KuL) tillstånd review for the
+Kreditvakt offering.
 
 ## Get access
 
-https://norric.io/api
+Free tier self-serve: https://norric.io/api
+Standard / Compliance: `hej@norric.io`
 
 ## Endpoint
 
@@ -59,9 +64,9 @@ https://mcp.norric.io/mcp
 ## Authentication
 
 ```
-Authorization: Bearer nrc_your_api_key
+Authorization: Bearer nrk_your_api_key
 # or
-X-Norric-Key: nrc_your_api_key
+X-Norric-Key: nrk_your_api_key
 ```
 
 ## Quick start
@@ -79,7 +84,7 @@ SESSION=$(curl -si \
 curl -s -X POST https://mcp.norric.io/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
-  -H "Authorization: Bearer nrc_your_api_key" \
+  -H "Authorization: Bearer nrk_your_api_key" \
   -H "mcp-session-id: $SESSION" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"norric_status_v1","arguments":{}}}'
 ```
@@ -88,7 +93,7 @@ curl -s -X POST https://mcp.norric.io/mcp \
 
 ```bash
 claude mcp add norric https://mcp.norric.io/mcp \
-  --header "Authorization: Bearer nrc_your_api_key"
+  --header "Authorization: Bearer nrk_your_api_key"
 ```
 
 ## Company

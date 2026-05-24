@@ -26,7 +26,7 @@ contractor prospecting, public sector procurement intelligence.
 ```json
 {
   "tool": "kreditvakt_score_company_v1",
-  "description": "Returns 12-month insolvency probability (0-1) and 5-band risk tier for any Swedish aktiebolag, based on Skatteverket tax arrears, Kronofogden payment orders, and Bolagsverket filing history.",
+  "description": "Returns risk_score (0–20, ascending = worse), risk_band (1–5), and risk_tier (HEALTHY|WATCH|ELEVATED|HIGH|CRITICAL) for any Swedish aktiebolag, based on Bolagsverket konkursansökan filings, Skatteverket tax arrears, and Kronofogden payment orders. Orgnrs not yet in coverage return HTTP 404 orgnr_not_ingested — a coverage gap, not a low-risk signal.",
   "input_schema": {
     "orgnr": "Swedish organisation number, e.g. 556123-4567"
   }
@@ -74,7 +74,9 @@ contractor prospecting, public sector procurement intelligence.
 }
 ```
 
-**Free tier available:** `norric_status_v1`, `norric_explain_score_v1`, `norric_data_freshness_v1` — 100 calls/day, no payment required.
+**Free tier available:** `norric_status_v1`, `norric_data_freshness_v1` — 100 calls/day, no payment required, self-serve sign-up at https://norric.io/api.
 
-**Submission URL:** https://github.com/anthropics/anthropic-quickstarts
-(open PR or use connector submission form at modelcontextprotocol.io)
+**Paid tiers (Standard / Compliance):** All other tools require a paid key. Self-serve sign-up paused pending kreditupplysningslagen (KuL) tillstånd review for the Kreditvakt offering. Paid keys issued direct via `hej@norric.io` with qualification + ToS step.
+
+**Submission URL:** Anthropic Connectors Directory submission form — https://claude.com/docs/connectors/building/submission
+(reviewed in ~2 weeks; requires tool annotations, privacy policy URL, and a test API key for reviewers).

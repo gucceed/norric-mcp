@@ -6,10 +6,10 @@ integration code.
 
 ## Connection
 
-MCP URL: https://norric-mcp-production.up.railway.app/mcp
-API keys: https://norric.io/api-keys
+MCP URL: https://mcp.norric.io/mcp
+API keys: https://norric.io/api  (Free tier self-serve; Standard/Compliance via hej@norric.io)
 Transport: Streamable HTTP (FastMCP 3.2.3)
-Auth: Bearer token in Authorization header
+Auth: Bearer token in Authorization header (or `X-Norric-Key`)
 
 ## FastMCP handshake (required for direct curl calls)
 
@@ -25,10 +25,12 @@ Claude Code and Claude Desktop handle this automatically.
 ### Pattern 1 — Portfolio credit scan
 ```
 Use kreditvakt_batch_score_v1 to score a list of orgnr.
-Filter results where insolvency_score > 60.
+Filter results where risk_tier in ('HIGH','CRITICAL') (or risk_score >= 13).
 For each high-risk company, call kreditvakt_score_company_v1
-to get the full signal breakdown.
-Surface the top 5 by score with verdict and onset_days.
+to get the full signal breakdown (signals[] with weights and sources).
+Surface the top 5 by risk_score (descending). Note: orgnrs not yet
+in norric_entities return HTTP 404 orgnr_not_ingested — surface those
+separately so the user knows coverage is the gap, not the company.
 ```
 
 ### Pattern 2 — Weekly procurement briefing
@@ -41,10 +43,17 @@ recommended talking points, contact name if available.
 
 ### Pattern 3 — BRF contractor pipeline
 ```
-Call sigvik_search_brfs_v1 with municipality and min_score=65.
-For each result, call sigvik_brf_score_v1 for full signal detail.
+For a list of BRF orgnrs (sourced from Hemnet, prior contractor CRM, or
+manual list — Sigvik does not currently expose a batch-search tool):
+1. Call sigvik_score_brf_v1 for each BRF to get the financial-health
+   + renovation-likelihood score.
+2. Filter to BRFs with elevated renovation likelihood (intent label
+   "Starkt signal" / "Måttlig signal").
+3. For shortlisted BRFs, call sigvik_brf_flags_v1 for active risk flags
+   (incl. EU 2033 energy-deadline flag) and sigvik_brf_avgift_v1 for
+   avgift trend.
 Return a ranked list with: BRF name, score, top renovation signal,
-estimated project window (onset_days).
+flags surfaced.
 ```
 
 ## Data freshness rules
@@ -57,8 +66,9 @@ Before acting on any Norric data in a consequential workflow
 
 ## Rate limits
 
-- Sandbox: 100 calls/month total
-- Professional: 5,000 calls/month
+- Free tier: 100 calls/day per key + 10 req/min per IP (anonymous endpoints).
+- Standard tier: 10,000 calls/day per key.
+- Compliance tier: unlimited per-day; IP rate limit only.
 - On 429: wait 60 seconds, retry once. If second 429, stop and inform user.
 
 ## Error handling
@@ -69,8 +79,10 @@ Before acting on any Norric data in a consequential workflow
 
 ## What not to do
 
-- Never call kreditvakt_batch_score_v1 with more than 100 orgnr at once
+- Never call kreditvakt_batch_score_v1 with more than 500 orgnr at once
 - Never expose API keys in output, logs, or user-visible text
-- Never present insolvency scores as a definitive bankruptcy prediction —
-  always include the verdict field and note it is a probabilistic signal
+- Never present a risk_score / risk_tier as a definitive bankruptcy prediction —
+  it is a probabilistic signal. Always surface risk_tier alongside risk_score
+  and note that orgnrs returning HTTP 404 orgnr_not_ingested are coverage gaps,
+  not low-risk.
 - Never cache Norric responses for more than 24 hours

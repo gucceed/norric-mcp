@@ -266,3 +266,103 @@ Built end-to-end bulk-file konkurs ingester for Bolagsverket. First production i
 
 **Known issue surfaced (not introduced):** Scorer's Kronofogden count query in `scoring/kreditvakt.py` lacks a `raw_data->>'signal_type'` filter — our konkurs rows are being double-counted as Kronofogden cases. Pre-existing bug, only visible now that real konkurs data is present. Separate fix.
 
+---
+
+## 2026-05-24
+
+### Dashboard REST transport bridge pushed — browser SSE hang workaround
+
+**What changed (commit `373eaae`, pushed to `origin/main` alongside 5 prior unpushed commits including the intelligence MCP tools and score-screen MVP):**
+
+- `kreditvakt/api.py`: three REST endpoints (`/api/v1/score/{orgnr}`, `/api/v1/search`, `/api/v1/contagion-map/{orgnr}`) mirroring `norric_score_v1` / `norric_search_v1` / `norric_contagion_map_v1`. Same Norric envelope; no session handshake; `application/json` with `Content-Length`. MCP remains canonical for non-browser clients.
+- `server.py`: `_mcp_asgi = mcp.http_app(json_response=True)` keeps `/mcp` usable from browsers that prefer JSON via `Accept` negotiation. CORS expanded for 127.0.0.1 origins, DELETE, `X-Norric-Key`, `Mcp-Session-Id`, `Mcp-Protocol-Version`, `Accept`; `Mcp-Session-Id` added to `expose_headers`.
+- `dashboard/`: REST client replaces the JSON-RPC + handshake plumbing; FNV-1a peer-jitter so same-kommun BRFs don't stack at one pixel; SearchBar gates queries on focus + non-prefill so the navigated /score query isn't races; Vite proxy `agent: false` on `/mcp` disables connection pooling so FastMCP's SSE hold-open can't serialise calls.
+
+**Why:** Browser fetch reads of FastMCP's `text/event-stream` tool-call response bodies hang 20+s after headers arrive (Chrome / Safari / Firefox). Curl and the MCP TypeScript SDK both unaffected. Workarounds attempted (json_response=True alone, Accept negotiation, fresh sockets per request) reduced but did not eliminate. Root cause never conclusively isolated; suspected FastMCP SSE stream lifecycle × browser fetch body buffering. REST bridge sidesteps it entirely for the dashboard's read-only flows.
+
+**Reversibility:** HIGH — REST endpoints are additive; removing them does not affect MCP behaviour.
+
+**Review trigger:** If FastMCP releases a fix for the SSE-body-buffering interop, revisit whether the REST bridge is still worth maintaining.
+
+---
+
+### Blocker flagged — norric_auth refactor NOT pushed; would brick production auth
+
+**What was held back:** Uncommitted local changes to `core/db_auth.py` (rewrites `lookup_key()` to delegate to a `norric_auth.Validator` from a new shared package) and the new `tests/test_auth_smoke.py` (mocks `norric_auth.ApiKey` / `Tier` / `Validator`).
+
+**Why not pushed:** The `norric_auth` package is not in `requirements.txt`, not on GitHub (no `gucceed/norric-auth` repo), and not even a git repo locally (only at `/Users/admin/Code/norric-auth/` as a loose pyproject). The diff has a sys.path fallback to `/Users/admin/Code/norric-auth/src` inside `except ImportError:` — that path does not exist on Railway. Production deploy would: fail the first import → fall through to sys.path.insert → fail the second import → every `lookup_key()` call returns `None` → middleware returns 401 on every request including `/health` if it touches the same path.
+
+**State:** Files left as uncommitted modifications + untracked test, exactly as found. The 2026-05-04 DB-backed validation path is what production is running.
+
+**Reversibility:** HIGH — nothing was changed in the production-bound code.
+
+**Review trigger:** Edgar to either (a) create `gucceed/norric-auth` repo and add a `git+ssh://...` line to `requirements.txt`, (b) move the validator into the existing `gucceed/norric-shared` package, or (c) abandon the refactor and revert `core/db_auth.py`.
+
+---
+
+### Lagprövning — KuL question gates paid Kreditvakt MCP tiers in public distribution; restrict to Free until counsel confirms
+
+**Trigger:** Pre-distribution sweep (2026-05-24 megaprompt). Holding `~/Code/norric/CLAUDE.md` mandates sektorsspecifik lagprövning at scoping; memory entry "KuL tillstånd flagged for Kreditvakt" was 15 days old without a resolving log entry; no prior entry covered MCP-mediated paid-tier delivery specifically.
+
+**Question:** Does selling the Norric MCP Kreditvakt tier suite — `kreditvakt_score_company_v1`, `kreditvakt_batch_score_v1`, `kreditvakt_debt_signals_v1`, `kreditvakt_bankruptcy_status_v1`, `norric_company_profile_v1`, and the Compliance-only `norric_explain_score_v1` — via paid API tiers constitute *kreditupplysningsverksamhet* under kreditupplysningslagen (1973:1173)? If yes, is tillstånd from IMY required before public listing on mcp.so / Anthropic Connectors Directory / PulseMCP / norric.io public pricing?
+
+**Preliminary read (NOT a substitute for counsel):**
+
+1. KuL §3 defines kreditupplysning as "uppgift, omdöme eller råd som lämnas till ledning för bedömning av annans kreditvärdighet eller vederhäftighet i övrigt i ekonomiskt hänseende". Norric outputs are explicit kreditbedömningar (`risk_score` 0–20, `risk_tier` HEALTHY|WATCH|ELEVATED|HIGH|CRITICAL, `distress_probability` internally, plus the explain_score provenance chain) keyed to orgnr. Plain-text reading: Kreditvakt outputs fall inside KuL's scope.
+
+2. KuL applies to juridiska personer as well as konsumenter — företagskreditupplysningar are inside the lagstiftning's scope. Selling them to a third party for fee is the canonical regulated activity.
+
+3. MCP-mediated delivery does not change the analysis. KuL is technology-agnostic; the regulated activity is providing kreditbedömningar to third parties for a fee, regardless of transport (REST, MCP, email PDF, printed letter).
+
+4. `norric_explain_score_v1` (Compliance tier) is the most exposed surface — its provenance + signal breakdown is exactly the auditability output a regulated credit-grantor would use for KuL §9 (saklighetskrav). Selling that capability positions Norric squarely as a kreditupplysningsföretag.
+
+5. Free tier (`norric_status_v1`, `norric_data_freshness_v1`) does NOT return kreditbedömningar — `_status_v1` is service health, `_data_freshness_v1` is pipeline freshness. Free-tier-only distribution does not trigger KuL.
+
+6. **What this prövning cannot answer:** the precise §3 boundary for B2B portfolio-monitoring use vs credit-decision use; whether a tillståndsfri delivery model exists (e.g., raw signal data without a computed score); §13 kreditupplysningskopia obligations for juridiska personer; and the interaction with GDPR Article 28 for buyers redistributing Norric outputs. These are counsel's call.
+
+**Adjacent regelverk surfaced (not resolved here):**
+
+- **MFL §10 (otillbörlig marknadsföring):** `/health` (2026-05-24T) reports 16 tracked companies in Kreditvakt. Listing copy that positions Norric as "Sweden-wide insolvency intelligence" without disclosing the `norric_entities`-membership gate is an MFL risk independent of KuL. To fix in the same doc cleanup as this entry — see follow-up subsections.
+- **Konkursansökan dataset:** 29,206 Bolagsverket rows ingested 2026-05-14 are real and queryable, but limited to companies *with* a konkurs filing. Copy must not imply broader coverage than the underlying signal supports.
+- **LEK / Avtalsvillkorslagen (1994:1512) för näringsidkare:** Standard/Compliance Stripe checkout would need Swedish-language ToS for SE buyers. Deferred — paid tiers held back from public funnel per decision below.
+
+**Decision:**
+
+1. **Suspend Standard and Compliance tiers from public listings** (mcp.so, Anthropic Connectors Directory, PulseMCP, registry.modelcontextprotocol.io, public norric.io pricing) until counsel confirms tillståndsstatus. Existing issued paid keys keep working — middleware enforcement is unchanged. New paid-tier acquisitions move to a manual qualification + ToS flow off public listing surfaces (`hej@norric.io` lead capture).
+
+2. Free-tier-only positioning for the current distribution sweep: PulseMCP form, Anthropic Connectors Directory submission, mcp.so listing update (the existing 2026-05-08 comment and the registry.modelcontextprotocol.io v1.0.0 entry both name paid tiers — revise via comment update / re-publish).
+
+3. Edgar to engage counsel on: tillståndsansökan, §11/§12/§13 obligations, GDPR Article 28 implications for buyers redistributing Norric outputs, and whether a tillståndsfri offering exists (e.g., raw signal data only, with the scoring layer disclaimed as the customer's own algorithm).
+
+4. `norric_entities` backfill from Bolagsverket bulk is the operational prerequisite for *any* "Sweden-wide" marketing claim after tillstånd lands. Separate sequencing — not in scope of this prövning.
+
+**Reversibility:** HIGH at the listing layer (copy + form edits only; no technical changes). MEDIUM at customer-issuance (existing paid keys keep working; only new public-funnel acquisitions throttled to manual). LOW for the prior-public-footprint blast (registry.modelcontextprotocol.io v1.0.0, mcp.so issue comment, awesome-mcp-servers PR #6042 already exist; cached/indexed copies persist).
+
+**Review trigger:**
+- IMY tillstånd granted, OR counsel issues memo on a narrower tillämpningsområde.
+- A buyer pre-commits to Compliance tier with KuL liability documented in contract — bespoke private listing may become appropriate.
+- IMY publishes new vägledning that materially changes the §3 boundary analysis.
+- `norric_entities` backfill crosses 100k entities — re-evaluate "Sweden-wide" copy under MFL.
+- This prövning is reviewed annually irrespective of triggers above.
+
+---
+
+### Doc drift cleanup — score scale, tier mapping, stale URLs, listing pricing
+
+**What changed:** Surgical edits across `README.md`, `AGENTS.md`, `registry/servers.yaml`, `registry/mcpso_listing.md`, `registry/anthropic_connector_submission.md` to bring documented surfaces into alignment with: (a) the canonical `risk_score` 0–20 contract locked in the kill-mock-fallback PR per CHANGELOG `Unreleased`, (b) the canonical `mcp.norric.io` endpoint (replacing stale Railway preview hostname per 2026-05-08 entry above), (c) the Free-tier-only public listing positioning from the KuL lagprövning above. Also deleted the superseded `ingestion/bolagsverket/reference/apier_email_draft.md` (underscore) — canonical version is `apier-email-draft.md` (dash).
+
+**Per-file changes:**
+- `README.md`: pricing table now shows "Contact" for Standard/Compliance; Free tier rows drop `norric_explain_score_v1` (Compliance-only); Kreditvakt tool descriptions reference `risk_score` 0–20 instead of "0-100 insolvency score".
+- `AGENTS.md`: connection URL `mcp.norric.io/mcp`; Pattern 1 example uses `risk_tier in ('HIGH','CRITICAL')` instead of `insolvency_score > 60`; Pattern 3 stale tool names (`sigvik_search_brfs_v1`, `sigvik_brf_score_v1`) replaced with canonical (`sigvik_score_brf_v1` + companions); rate-limit copy aligned with current per-key DB-backed enforcement.
+- `registry/servers.yaml`: `tool_count: 19` → `21`; `norric_data_freshness_v1` moved from `paid_tier_tools` to `free_tier_tools`. `norric_explain_score_v1` stays in `paid_tier_tools` (Compliance-gated).
+- `registry/mcpso_listing.md`: prices replaced with "Contact"; Free tier description aligned; `nrc_` key prefix corrected to `nrk_`; Kreditvakt example description updated for 0–20 scale.
+- `registry/anthropic_connector_submission.md`: Kreditvakt example description updated for 0–20 scale; Free tier line drops `norric_explain_score_v1`; submission URL corrected to Anthropic Connectors Directory Google form per current submission flow (replaces stale `anthropic-quickstarts` reference).
+
+**Reversibility:** HIGH — `git revert` on the doc-cleanup commit; no behavioural change.
+
+**Review trigger:** None — these are alignment edits to existing canonical decisions logged above. If the CHANGELOG `Unreleased` section materially changes (e.g. additional public field removals), this entry's tool descriptions need re-checking.
+
+**Out of scope (not done):**
+- `INTEGRATION.md` — grepped for `0-100` / `verdict` / `insolvency_score` / `distress_probability`; returned nothing. File describes the provenance-layer wire-up (Steps 1–9), not the public API surface. No edits required in this pass.
+- `registry/submit.py` and generators — left unchanged; the YAML-to-payload generators correctly emit whatever YAML contains, so re-running `python -m registry.submit norric-mcp` after YAML edits will produce free-tier-aware payloads automatically. Re-submission to PulseMCP and updated mcp.so comment are manual steps tracked in the session summary.
+

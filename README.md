@@ -48,11 +48,13 @@ Wrong key returns `401 {"error": "Invalid API key…"}`.
 
 | Tier | Tools | Daily limit | Price |
 |------|-------|-------------|-------|
-| **Free** | `norric_status_v1`, `norric_explain_score_v1`, `norric_data_freshness_v1` | 100 calls/day | Free |
-| **Standard** | All 21 tools | 10,000 calls/day | 2,900 SEK/month |
-| **Compliance** | All 21 tools + audit rights | Unlimited | 9,900 SEK/month |
+| **Free** | `norric_status_v1`, `norric_data_freshness_v1` | 100 calls/day | Free |
+| **Standard** | All product tools (SIGNAL · Kreditvakt · Vigil · SiteLoop · Sigvik) + `norric_company_profile_v1` | 10,000 calls/day | Contact |
+| **Compliance** | Standard + `norric_explain_score_v1` (EU AI Act provenance) | Unlimited | Contact |
 
-Annual plans: Standard 29,000 SEK/year · Compliance 99,000 SEK/year
+Standard and Compliance tiers are issued direct — email `hej@norric.io` for qualification,
+pricing, and ToS. Public self-serve for paid tiers is paused pending kreditupplysningslagen
+(KuL) review for the Kreditvakt offering.
 
 ---
 
@@ -117,7 +119,7 @@ claude mcp add norric http://localhost:8080/mcp \
 ### Norric Kreditvakt — Insolvency intelligence
 | Tool | Description |
 |------|-------------|
-| `kreditvakt_score_company_v1` | 0-100 insolvency score, 9-month accuracy |
+| `kreditvakt_score_company_v1` | `risk_score` 0–20 + `risk_band` (1–5) + `risk_tier` (HEALTHY…CRITICAL) |
 | `kreditvakt_batch_score_v1` | Portfolio scoring, max 500 orgnrs |
 | `kreditvakt_debt_signals_v1` | Skatteverket restanslängd data |
 | `kreditvakt_bankruptcy_status_v1` | Bolagsverket konkurs status |
