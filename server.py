@@ -1917,7 +1917,15 @@ async def _health_handler(scope, receive, send):
 
 
 # ── Composite ASGI: /health + issuance + MCP (all other paths) ────────────────
-_mcp_asgi = mcp.http_app()
+#
+# json_response=True returns each tools/call result as a single-shot
+# application/json response instead of a text/event-stream. Browsers (and
+# the http-proxy in Vite) handle one-shot JSON correctly; the SSE response
+# pattern triggers a 20+s body-read delay in browser fetch even though
+# headers arrive immediately. Curl was unaffected — confirmed it's a
+# browser/SSE interop quirk, not a backend bug. JSON mode keeps the MCP
+# contract intact for any client that prefers it via Accept negotiation.
+_mcp_asgi = mcp.http_app(json_response=True)
 
 from issuance.main import app as _issuance_app  # noqa: E402
 from kreditvakt.api import app as _kreditvakt_app  # noqa: E402
@@ -1950,9 +1958,19 @@ app = CORSMiddleware(
         "https://www.kreditvakt.com",
         "http://localhost:5173",
         "http://localhost:4173",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:4173",
     ],
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization"],
+    allow_methods=["GET", "POST", "OPTIONS", "DELETE"],
+    allow_headers=[
+        "Content-Type",
+        "Authorization",
+        "X-Norric-Key",
+        "Mcp-Session-Id",
+        "Mcp-Protocol-Version",
+        "Accept",
+    ],
+    expose_headers=["Mcp-Session-Id"],
     allow_credentials=False,
 )
 

@@ -61,6 +61,20 @@ export function BlastRadius({ envelope }: Props) {
     );
   }
 
+  // Apply deterministic jitter so peers in the same kommun (which share the
+  // municipality centroid lat/lng exactly) don't render stacked at one pixel.
+  // Offset is hashed from orgnr → up to ~0.035° (~4km) — keeps each node within
+  // its own kommun while making the network visually legible.
+  const JITTER_DEG = 0.035;
+  const jittered = (p: ContagionPeer): { lat: number; lng: number } => {
+    const lat0 = p.lat!;
+    const lng0 = p.lng!;
+    const h = hashStr(p.orgnr);
+    const dx = ((h & 0xffff) / 0xffff - 0.5) * 2 * JITTER_DEG;
+    const dy = (((h >>> 16) & 0xffff) / 0xffff - 0.5) * 2 * JITTER_DEG;
+    return { lat: lat0 + dy, lng: lng0 + dx };
+  };
+
   const allPts: Array<{ lat: number; lng: number }> = [
     { lat: source.lat, lng: source.lng },
   ];
@@ -68,13 +82,23 @@ export function BlastRadius({ envelope }: Props) {
     peer: ContagionPeer;
     ringIdx: number;
     matchReason: string;
+    /** Display position after jitter — geography stays at original lat/lng. */
+    displayLat: number;
+    displayLng: number;
   }> = [];
 
   data.rings.forEach((ring, idx) => {
     ring.peers.forEach((p) => {
       if (p.lat != null && p.lng != null) {
-        allPts.push({ lat: p.lat, lng: p.lng });
-        peers.push({ peer: p, ringIdx: idx + 1, matchReason: ring.match_reason });
+        const j = jittered(p);
+        allPts.push(j);
+        peers.push({
+          peer: p,
+          ringIdx: idx + 1,
+          matchReason: ring.match_reason,
+          displayLat: j.lat,
+          displayLng: j.lng,
+        });
       }
     });
   });
@@ -167,7 +191,13 @@ function BlastOverlay({
   peers,
 }: {
   source: NonNullable<ContagionMap['source']>;
-  peers: Array<{ peer: ContagionPeer; ringIdx: number; matchReason: string }>;
+  peers: Array<{
+    peer: ContagionPeer;
+    ringIdx: number;
+    matchReason: string;
+    displayLat: number;
+    displayLng: number;
+  }>;
 }) {
   const map = useMap();
   const [, force] = useState(0);
@@ -195,8 +225,8 @@ function BlastOverlay({
 
   const projectedPeers: ProjectedPeer[] = useMemo(
     () =>
-      peers.map(({ peer, ringIdx, matchReason }) => {
-        const pt = map.latLngToContainerPoint(L.latLng(peer.lat!, peer.lng!));
+      peers.map(({ peer, ringIdx, matchReason, displayLat, displayLng }) => {
+        const pt = map.latLngToContainerPoint(L.latLng(displayLat, displayLng));
         return { x: pt.x, y: pt.y, peer, ringIdx, matchReason };
       }),
     [map, peers, W, H],
@@ -595,4 +625,14 @@ function sourceInitial(s: string): string {
   if (!trimmed) return '?';
   const first = trimmed.split(/\s+/)[0];
   return first[0]?.toUpperCase() ?? '?';
+}
+
+/** Deterministic 32-bit hash (FNV-1a) for orgnr → stable per-node jitter offset. */
+function hashStr(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = (h * 0x01000193) >>> 0;
+  }
+  return h >>> 0;
 }

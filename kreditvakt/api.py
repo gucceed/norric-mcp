@@ -910,6 +910,180 @@ def _confidence_label(result: dict) -> str:
     return "Tidig indikation"
 
 
+# ── Norric Intelligence REST bridge (dashboard) ────────────────────────────────
+#
+# Three thin endpoints exposing the same payload shapes as the
+# norric_*_v1 MCP tools, for clients that can't speak Streamable HTTP /
+# SSE cleanly (browser fetch was observed to hang reading FastMCP's SSE
+# response bodies past their headers, even with json_response=True).
+# MCP remains the canonical contract — these endpoints are an additional
+# transport. Same data, same envelope, no session handshake.
+
+from datetime import datetime, timezone as _tz  # noqa: E402
+import secrets as _secrets  # noqa: E402
+
+
+def _meta(tool: str, source: list, confidence: float, ttl: int) -> dict:
+    return {
+        "response_id":        f"nrsp_{_secrets.token_hex(6)}",
+        "tool":               tool,
+        "source":             source,
+        "fetched_at":         datetime.now(_tz.utc).isoformat(),
+        "confidence":         confidence,
+        "cache_ttl_seconds":  ttl,
+        "is_cached":          False,
+    }
+
+
+def _wrap(tool: str, source: list, confidence: float, ttl: int, data: dict,
+          warnings: list[str] | None = None) -> dict:
+    return {
+        "data":     data,
+        "metadata": _meta(tool, source, confidence, ttl),
+        "signals":  [],
+        "warnings": warnings or [],
+    }
+
+
+@app.get("/api/v1/score/{orgnr}", summary="Norric intelligence: full score package (REST)")
+def norric_score_rest(orgnr: str, request: Request):
+    """REST bridge for norric_score_v1 — full intelligence package."""
+    from scoring.kreditvakt import score_from_db
+    from kreditvakt.intelligence import build_score_intelligence
+    from ingestion.db import Session
+
+    try:
+        orgnr_norm = _validate_orgnr(orgnr)
+    except HTTPException as exc:
+        raise exc
+
+    db = Session()
+    try:
+        result = score_from_db(db, orgnr_norm)
+        package = build_score_intelligence(db, orgnr_norm, result)
+    except Exception as exc:
+        log.error("norric_score_rest[%s] failed: %s", orgnr_norm, exc, exc_info=True)
+        db.close()
+        return _wrap(
+            tool="norric_score_v1", source=[], confidence=0.0, ttl=0,
+            data={"orgnr": orgnr_norm},
+            warnings=[f"scoring_error: {type(exc).__name__}"],
+        )
+    finally:
+        try: db.close()
+        except Exception: pass
+
+    distress = result.get("distress_probability")
+    confidence = max(0.0, 1.0 - distress) if distress is not None else 0.0
+    warnings: list[str] = []
+    if result.get("stale_data"):
+        warnings.append(
+            f"Data freshness {result.get('data_freshness_hours', '?')}h — exceeds 48h threshold"
+        )
+    if package["company"]["sector"] is None:
+        warnings.append("no_procurement_history: sector cannot be derived")
+    if package["company"]["lat"] is None:
+        warnings.append("no_geo_anchor: municipality coordinates unavailable")
+
+    return _wrap(
+        tool="norric_score_v1",
+        source=["skatteverket", "kronofogden", "bolagsverket",
+                "norric_entities", "company_scores", "company_score_history",
+                "signal_contracts", "contagion_peers", "municipalities"],
+        confidence=round(confidence, 2),
+        ttl=900,
+        data=package,
+        warnings=warnings,
+    )
+
+
+@app.get("/api/v1/search", summary="Norric intelligence: company search (REST)")
+def norric_search_rest(q: str = Query("", min_length=0, max_length=200),
+                       limit: int = Query(10, ge=1, le=50)):
+    """REST bridge for norric_search_v1 — orgnr / name prefix search."""
+    from kreditvakt.intelligence import search_entities
+    from ingestion.db import Session
+
+    q_stripped = (q or "").strip()
+    if not q_stripped:
+        return _wrap(
+            tool="norric_search_v1",
+            source=["norric_entities"],
+            confidence=0.0, ttl=0,
+            data={"query": "", "results": [], "result_count": 0},
+            warnings=["empty_query"],
+        )
+
+    db = Session()
+    try:
+        results = search_entities(db, q_stripped, limit=limit)
+    except Exception as exc:
+        log.error("norric_search_rest failed: %s", exc, exc_info=True)
+        results = []
+    finally:
+        db.close()
+
+    return _wrap(
+        tool="norric_search_v1",
+        source=["norric_entities", "company_scores"],
+        confidence=1.0 if results else 0.0,
+        ttl=300,
+        data={"query": q_stripped, "results": results, "result_count": len(results)},
+        warnings=[] if results else ["no_matches"],
+    )
+
+
+@app.get("/api/v1/contagion-map/{orgnr}", summary="Norric intelligence: blast-radius (REST)")
+def norric_contagion_map_rest(orgnr: str):
+    """REST bridge for norric_contagion_map_v1 — blast-radius shape."""
+    from kreditvakt.intelligence import build_contagion_map
+    from ingestion.db import Session
+
+    try:
+        orgnr_norm = _validate_orgnr(orgnr)
+    except HTTPException as exc:
+        raise exc
+
+    db = Session()
+    try:
+        m = build_contagion_map(db, orgnr_norm)
+    except Exception as exc:
+        log.error("norric_contagion_map_rest[%s] failed: %s", orgnr_norm, exc, exc_info=True)
+        return _wrap(
+            tool="norric_contagion_map_v1",
+            source=[], confidence=0.0, ttl=0,
+            data={"orgnr": orgnr_norm},
+            warnings=[f"contagion_map_error: {type(exc).__name__}"],
+        )
+    finally:
+        db.close()
+
+    warnings = [
+        "Contagion peers are probabilistic based on shared procurement sector "
+        "and geographic proximity. Not verified supply chain relationships.",
+    ]
+    if m.get("warning") == "orgnr_not_ingested":
+        warnings.append("orgnr_not_ingested: not in norric_entities")
+    if m["summary"]["total_peers"] == 0:
+        warnings.append(
+            "no_peers: source has no procurement history (sector unknown) "
+            "or no scored companies in same kommunkod/county"
+        )
+
+    confidence = (
+        0.5 if any(r["ring"] == 1 for r in m["rings"])
+        else 0.3 if m["rings"]
+        else 0.0
+    )
+
+    return _wrap(
+        tool="norric_contagion_map_v1",
+        source=["contagion_peers", "norric_entities", "municipalities", "company_scores"],
+        confidence=confidence, ttl=14_400,
+        data=m, warnings=warnings,
+    )
+
+
 # ── Standalone entry point ─────────────────────────────────────────────────────
 
 if __name__ == "__main__":

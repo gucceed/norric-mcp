@@ -166,31 +166,7 @@ export interface ContagionMap {
   warning?: string;
 }
 
-// ── JSON-RPC primitives ───────────────────────────────────────────────────────
-
-interface JsonRpcRequest {
-  jsonrpc: '2.0';
-  id?: number;
-  method: string;
-  params?: Record<string, unknown>;
-}
-
-interface JsonRpcResponse<T = unknown> {
-  jsonrpc: '2.0';
-  id: number;
-  result?: T;
-  error?: { code: number; message: string; data?: unknown };
-}
-
-interface ToolCallResult {
-  content: Array<{ type: string; text: string }>;
-  isError?: boolean;
-}
-
 // ── Client ────────────────────────────────────────────────────────────────────
-
-const MCP_PROTOCOL_VERSION = '2025-03-26';
-const CLIENT_INFO = { name: 'norric-dashboard', version: '0.1.0' };
 
 class NorricMcpError extends Error {
   constructor(message: string, public readonly cause?: unknown) {
@@ -199,209 +175,78 @@ class NorricMcpError extends Error {
   }
 }
 
+/**
+ * REST transport for the Norric intelligence endpoints.
+ *
+ * The dashboard originally targeted the FastMCP /mcp endpoint via the
+ * Streamable HTTP protocol (initialize → notifications/initialized →
+ * tools/call). That worked from curl and from the MCP TypeScript SDK,
+ * but every browser fetch we tried — proxied or direct, SSE or json,
+ * with or without keepalive — saw the response body delayed by 20+
+ * seconds despite headers arriving promptly. Root cause was never
+ * conclusively isolated; suspected interaction between FastMCP's SSE
+ * stream lifecycle and the browser's fetch body buffering.
+ *
+ * The /api/v1/* endpoints in kreditvakt/api.py wrap the same underlying
+ * functions the MCP tools call (kreditvakt.intelligence) and return the
+ * same Norric envelope shape. No session handshake, no SSE, content-type
+ * application/json with Content-Length. The MCP tools remain canonical
+ * for non-browser clients (IDE integrations, curl, MCP SDKs).
+ */
 export class NorricMcpClient {
-  private sessionId: string | null = null;
-  private initInFlight: Promise<void> | null = null;
-  private nextId = 1;
-
   constructor(
     private readonly baseUrl: string,
     private readonly apiKey?: string,
   ) {}
 
-  private buildHeaders(includeSession = true): HeadersInit {
+  private buildHeaders(): HeadersInit {
     const h: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Accept: 'application/json, text/event-stream',
+      Accept: 'application/json',
     };
-    if (includeSession && this.sessionId) {
-      h['Mcp-Session-Id'] = this.sessionId;
-    }
     if (this.apiKey) {
       h['X-Norric-Key'] = this.apiKey;
     }
     return h;
   }
 
-  /**
-   * Parse the response body. FastMCP may return either application/json or
-   * text/event-stream (SSE) depending on the negotiation — for our one-shot
-   * tool calls it's always JSON, but we handle the SSE case defensively so
-   * a single streamed chunk doesn't break the client.
-   */
-  private async parseBody<T>(res: Response): Promise<JsonRpcResponse<T> | null> {
-    const ct = res.headers.get('content-type') ?? '';
-    if (ct.includes('text/event-stream')) {
-      const text = await res.text();
-      // Pick the first `data: {...}` frame.
-      const match = text.match(/^data:\s*(.+)$/m);
-      if (!match) return null;
-      return JSON.parse(match[1]) as JsonRpcResponse<T>;
-    }
-    if (!ct.includes('application/json')) {
-      // 204 No Content is valid for notifications.
-      if (res.status === 204 || res.headers.get('content-length') === '0') {
-        return null;
-      }
-    }
-    const text = await res.text();
-    if (!text) return null;
-    return JSON.parse(text) as JsonRpcResponse<T>;
-  }
-
-  private async initialize(): Promise<void> {
-    // De-dupe concurrent initialize() calls.
-    if (this.initInFlight) return this.initInFlight;
-    this.initInFlight = (async () => {
-      const initReq: JsonRpcRequest = {
-        jsonrpc: '2.0',
-        id: this.nextId++,
-        method: 'initialize',
-        params: {
-          protocolVersion: MCP_PROTOCOL_VERSION,
-          capabilities: {},
-          clientInfo: CLIENT_INFO,
-        },
-      };
-
-      let initRes: Response;
-      try {
-        initRes = await fetch(this.baseUrl, {
-          method: 'POST',
-          headers: this.buildHeaders(false),
-          body: JSON.stringify(initReq),
-        });
-      } catch (e) {
-        this.initInFlight = null;
-        throw new NorricMcpError('Failed to reach MCP backend', e);
-      }
-
-      if (!initRes.ok) {
-        this.initInFlight = null;
-        throw new NorricMcpError(
-          `MCP initialize failed: ${initRes.status} ${initRes.statusText}`,
-        );
-      }
-
-      const sid = initRes.headers.get('Mcp-Session-Id') ?? initRes.headers.get('mcp-session-id');
-      if (!sid) {
-        this.initInFlight = null;
-        throw new NorricMcpError('MCP initialize returned no session id');
-      }
-      this.sessionId = sid;
-
-      // Drain the initialize response body — the JSON-RPC handshake reply.
-      await this.parseBody(initRes).catch(() => null);
-
-      // Per MCP spec the client MUST send notifications/initialized before
-      // any tool calls. It's a notification (no `id`) so no response body.
-      const notif: JsonRpcRequest = {
-        jsonrpc: '2.0',
-        method: 'notifications/initialized',
-      };
-      try {
-        await fetch(this.baseUrl, {
-          method: 'POST',
-          headers: this.buildHeaders(true),
-          body: JSON.stringify(notif),
-        });
-      } catch (e) {
-        // Notification failure isn't fatal — tool calls will surface the real error.
-        // eslint-disable-next-line no-console
-        console.warn('[mcp] notifications/initialized failed', e);
-      }
-    })();
-
+  private async getJson<T>(path: string): Promise<NorricEnvelope<T>> {
+    let res: Response;
     try {
-      await this.initInFlight;
-    } finally {
-      // Keep the cached sessionId; clear the in-flight marker either way.
-      this.initInFlight = null;
-    }
-  }
-
-  /**
-   * Call an MCP tool and unwrap to the canonical Norric envelope.
-   * Re-initializes once on 404 (session expired server-side).
-   */
-  async callTool<TData>(
-    name: string,
-    args: Record<string, unknown>,
-  ): Promise<NorricEnvelope<TData>> {
-    if (!this.sessionId) {
-      await this.initialize();
-    }
-
-    const callReq: JsonRpcRequest = {
-      jsonrpc: '2.0',
-      id: this.nextId++,
-      method: 'tools/call',
-      params: { name, arguments: args },
-    };
-
-    const attempt = async (): Promise<Response> =>
-      fetch(this.baseUrl, {
-        method: 'POST',
-        headers: this.buildHeaders(true),
-        body: JSON.stringify(callReq),
+      res = await fetch(`${this.baseUrl}${path}`, {
+        method: 'GET',
+        headers: this.buildHeaders(),
       });
-
-    let res = await attempt();
-    if (res.status === 404 || res.status === 401) {
-      // Session may have expired. Re-init once and retry.
-      this.sessionId = null;
-      await this.initialize();
-      res = await attempt();
-    }
-
-    if (!res.ok) {
-      throw new NorricMcpError(
-        `MCP tools/call ${name} failed: ${res.status} ${res.statusText}`,
-      );
-    }
-
-    const body = await this.parseBody<ToolCallResult>(res);
-    if (!body) {
-      throw new NorricMcpError(`MCP tools/call ${name} returned empty body`);
-    }
-    if (body.error) {
-      throw new NorricMcpError(`MCP error: ${body.error.message}`, body.error);
-    }
-    const content = body.result?.content?.[0];
-    if (!content || content.type !== 'text' || typeof content.text !== 'string') {
-      throw new NorricMcpError(`MCP tools/call ${name} returned unexpected content shape`);
-    }
-
-    let envelope: NorricEnvelope<TData>;
-    try {
-      envelope = JSON.parse(content.text) as NorricEnvelope<TData>;
     } catch (e) {
-      throw new NorricMcpError(`MCP tools/call ${name} returned non-JSON text`, e);
+      throw new NorricMcpError('Failed to reach Norric backend', e);
     }
-    return envelope;
+    if (!res.ok) {
+      throw new NorricMcpError(`Norric ${path} → HTTP ${res.status} ${res.statusText}`);
+    }
+    return (await res.json()) as NorricEnvelope<T>;
   }
 
-  // ── Typed wrappers — the three tools the dashboard consumes ───────────────
+  // ── Typed wrappers — the three endpoints the dashboard consumes ──────────
 
   score(orgnr: string) {
-    return this.callTool<ScoreIntelligence>('norric_score_v1', { orgnr });
+    return this.getJson<ScoreIntelligence>(`/score/${encodeURIComponent(orgnr)}`);
   }
 
   search(q: string, limit = 10) {
-    return this.callTool<SearchResponse>('norric_search_v1', { q, limit });
+    const qs = new URLSearchParams({ q, limit: String(limit) }).toString();
+    return this.getJson<SearchResponse>(`/search?${qs}`);
   }
 
   contagionMap(orgnr: string) {
-    return this.callTool<ContagionMap>('norric_contagion_map_v1', { orgnr });
+    return this.getJson<ContagionMap>(`/contagion-map/${encodeURIComponent(orgnr)}`);
   }
 }
 
 // ── Singleton (configured from Vite env) ──────────────────────────────────────
 
-const MCP_URL =
-  (import.meta.env.VITE_MCP_URL as string | undefined) ?? '/mcp';
+const BASE =
+  (import.meta.env.VITE_NORRIC_BASE as string | undefined) ?? '/api/v1';
 const API_KEY = import.meta.env.VITE_NORRIC_API_KEY as string | undefined;
 
-export const mcp = new NorricMcpClient(MCP_URL, API_KEY);
+export const mcp = new NorricMcpClient(BASE, API_KEY);
 
 export { NorricMcpError };

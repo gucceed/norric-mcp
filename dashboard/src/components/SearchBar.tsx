@@ -45,10 +45,16 @@ export function SearchBar({ autoFocus, compact, initialValue, onSelect }: Props)
     [debounced],
   );
 
+  // Only run the search when the user is actively typing in a focused input.
+  // Without `isFocused` gating, the pre-filled compact bar on /score/:orgnr
+  // would fire a search on every mount — piling up onto the already-running
+  // score + contagion tool calls and forcing serial queuing in the MCP
+  // session. We also skip when the value matches the navigated orgnr exactly.
+  const skipForUrlMatch = compact && debounced === (initialValue ?? '');
   const q = useQuery<NorricEnvelope<SearchResponse>>({
     queryKey: ['search', debounced],
     queryFn: () => mcp.search(debounced, 8),
-    enabled: debounced.length >= 2,
+    enabled: isFocused && debounced.length >= 2 && !skipForUrlMatch,
     staleTime: 30_000,
   });
 

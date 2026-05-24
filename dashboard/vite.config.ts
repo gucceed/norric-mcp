@@ -18,6 +18,16 @@ export default defineConfig({
       '/mcp': {
         target: BACKEND,
         changeOrigin: true,
+        // FastMCP's StreamableHTTP transport holds the SSE response open
+        // after each message frame, so HTTP/1.1 keepalive serialises
+        // concurrent tool calls (observed: 23s queue for parallel score
+        // + contagion fetches). Disabling the proxy's connection pool
+        // forces a fresh socket per request — the SSE hold-open can no
+        // longer block the next call.
+        agent: false,
+        // Pass through chunked SSE responses byte-for-byte; do not buffer.
+        selfHandleResponse: false,
+        ws: false,
       },
     },
   },
