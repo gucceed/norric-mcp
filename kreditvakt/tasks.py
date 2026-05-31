@@ -7,6 +7,8 @@ Kreditvakt Celery tasks:
   send_daily_briefing()            — Telegram briefing at 07:00 CET for Band 4/5 companies
 """
 
+from __future__ import annotations
+
 import logging
 import os
 from datetime import date
@@ -49,36 +51,73 @@ def score_single(orgnr: str) -> dict:
 
 # ── Task: batch score portfolio ────────────────────────────────────────────────
 
-def score_portfolio(orgnr_list: list[str]) -> dict:
-    """Score a list of companies. Returns summary dict."""
+def score_portfolio(orgnr_list: list[str] | None = None) -> dict:
+    """Score a batch of companies and record a norric_pipeline_runs row.
+
+    When ``orgnr_list`` is empty/None — which is what the nightly beat passes
+    (``{"orgnr_list": []}``) — score the full signal-bearing universe instead
+    of no-op'ing over an empty loop.
+    """
     from scoring.kreditvakt import score_from_db, write_score
+    from ingestion.pipeline_run import pipeline_run
 
     db = _get_db()
     results = []
     errors = []
 
     try:
-        for orgnr in orgnr_list:
-            try:
-                result = score_from_db(db, orgnr)
-                write_score(db, result)
-                results.append({
-                    "orgnr": orgnr,
-                    "risk_band": result["risk_band"],
-                    "distress_probability": result["distress_probability"],
-                })
-            except Exception as e:
-                log.error(f"[{orgnr}] portfolio scoring failed: {e}", exc_info=True)
-                errors.append({"orgnr": orgnr, "error": str(e)})
+        if not orgnr_list:
+            orgnr_list = _signal_bearing_orgnrs(db)
+            log.info(
+                "score_portfolio: empty list -> scoring %d signal-bearing orgnrs",
+                len(orgnr_list),
+            )
+
+        with pipeline_run(db, "kreditvakt_score_portfolio") as ctx:
+            for orgnr in orgnr_list:
+                try:
+                    result = score_from_db(db, orgnr)
+                    write_score(db, result)
+                    results.append({
+                        "orgnr": orgnr,
+                        "risk_band": result["risk_band"],
+                        "distress_probability": result["distress_probability"],
+                    })
+                except Exception as e:
+                    log.error(f"[{orgnr}] portfolio scoring failed: {e}", exc_info=True)
+                    errors.append({"orgnr": orgnr, "error": str(e)})
+            ctx["rows_processed"] = len(orgnr_list)
+            ctx["rows_updated"] = len(results)
+            ctx["rows_skipped"] = len(errors)
     finally:
         db.close()
 
     return {
         "scored": len(results),
         "errors": len(errors),
-        "error_detail": errors,
+        "error_detail": errors[:50],
         "results": results,
     }
+
+
+def _signal_bearing_orgnrs(db) -> list[str]:
+    """Scoring universe when no explicit list is given: every orgnr with at
+    least one payment/konkurs signal (or an active tax signal). The scorer only
+    emits 'live' for companies that have signals, so this set (~29k) gives full
+    meaningful coverage without writing ~885k 'no_signals' rows."""
+    from sqlalchemy import text
+
+    orgnrs: set[str] = set()
+    rows = db.execute(text("SELECT DISTINCT orgnr FROM norric_payment_signals")).fetchall()
+    orgnrs.update(r[0] for r in rows if r[0])
+    try:
+        trows = db.execute(
+            text("SELECT DISTINCT orgnr FROM norric_tax_signals WHERE is_active = true")
+        ).fetchall()
+        orgnrs.update(r[0] for r in trows if r[0])
+    except Exception:
+        db.rollback()  # tax table empty/unavailable — payment signals suffice
+    return sorted(orgnrs)
 
 
 # ── Task: Telegram daily briefing ─────────────────────────────────────────────

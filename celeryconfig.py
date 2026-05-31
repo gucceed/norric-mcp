@@ -10,7 +10,7 @@ accept_content    = ["json"]
 timezone          = "Europe/Stockholm"
 enable_utc        = True
 
-beat_schedule = {
+_FULL_BEAT_SCHEDULE = {
     # T1-01 Bolagsverket bulk — daily 03:00
     "bolagsverket-bulk-daily": {
         "task": "bolagsverket.bulk_ingest",
@@ -127,3 +127,48 @@ beat_schedule = {
         "options": {"expires": 3600},
     },
 }
+
+# ── Role-scoped beat / queue selection ────────────────────────────────────────
+# The full schedule above (T1 ingestion + vigil + signal) targets a future
+# general "norric" worker that is not yet deployed. Today the only deployed
+# consumer of this app is the Kreditvakt worker, which must stay isolated from
+# the shared sigvik queues/Redis. When CELERY_ROLE=kreditvakt:
+#   • beat fires ONLY the kreditvakt-relevant tasks,
+#   • those tasks route to a dedicated `kreditvakt` queue (worker runs -Q kreditvakt),
+#   • broker/result Redis uses its own DB index (REDIS_URL=.../1 set on the service).
+CELERY_ROLE = os.environ.get("CELERY_ROLE", "").strip().lower()
+
+_KREDITVAKT_BEAT_SCHEDULE = {
+    # Bolagsverket entity bulk — daily 03:00 Europe/Stockholm
+    "kreditvakt-bolagsverket-bulk": {
+        "task": "bolagsverket.bulk_ingest",
+        "schedule": crontab(hour=3, minute=0),
+        "options": {"queue": "kreditvakt"},
+    },
+    # Bolagsverket konkurs signals — daily 03:15 (after bulk; refreshes scoring inputs)
+    "kreditvakt-bolagsverket-konkurs": {
+        "task": "bolagsverket.konkurs_ingest",
+        "schedule": crontab(hour=3, minute=15),
+        "options": {"queue": "kreditvakt"},
+    },
+    # Portfolio rescore over the signal-bearing universe — daily 05:30
+    "kreditvakt-score-portfolio": {
+        "task": "kreditvakt.tasks.score_portfolio",
+        "schedule": crontab(hour=5, minute=30),
+        "kwargs": {"orgnr_list": []},  # empty → score_portfolio loads the signal-bearing universe
+        "options": {"queue": "kreditvakt"},
+    },
+}
+
+if CELERY_ROLE == "kreditvakt":
+    task_default_queue = "kreditvakt"
+    task_routes = {
+        "bolagsverket.bulk_ingest":             {"queue": "kreditvakt"},
+        "bolagsverket.konkurs_ingest":          {"queue": "kreditvakt"},
+        "kreditvakt.tasks.score_portfolio":     {"queue": "kreditvakt"},
+        "kreditvakt.tasks.score_single":        {"queue": "kreditvakt"},
+        "kreditvakt.tasks.send_daily_briefing": {"queue": "kreditvakt"},
+    }
+    beat_schedule = _KREDITVAKT_BEAT_SCHEDULE
+else:
+    beat_schedule = _FULL_BEAT_SCHEDULE

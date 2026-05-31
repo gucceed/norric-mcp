@@ -1892,6 +1892,36 @@ async def _health_handler(scope, receive, send):
                         if vigil_ingested and vigil_ingested.last_ingested else None,
                 },
             }
+
+            # Pipeline freshness / staleness guard (Class-C staleness gap):
+            # flag when there has been no successful norric_pipeline_runs row in 24h.
+            try:
+                fr_rows = db.execute(sqla_text("""
+                    SELECT pipeline,
+                           MAX(completed_at) AS last_success,
+                           EXTRACT(EPOCH FROM (now() - MAX(completed_at))) / 3600.0 AS hours_since
+                    FROM norric_pipeline_runs
+                    WHERE status = 'success'
+                    GROUP BY pipeline
+                """)).fetchall()
+                by_pipeline = {
+                    r.pipeline: {
+                        "last_success": r.last_success.isoformat() if r.last_success else None,
+                        "hours_since": round(float(r.hours_since), 1) if r.hours_since is not None else None,
+                    }
+                    for r in fr_rows
+                }
+                hours_vals = [float(r.hours_since) for r in fr_rows if r.hours_since is not None]
+                freshest = min(hours_vals) if hours_vals else None
+                health["pipeline_freshness"] = {
+                    "hours_since_last_success": round(freshest, 1) if freshest is not None else None,
+                    "stale_24h": (freshest is None) or (freshest > 24),
+                    "by_pipeline": by_pipeline,
+                }
+                if health["pipeline_freshness"]["stale_24h"]:
+                    health["status"] = "degraded"
+            except Exception as _fe:
+                health["pipeline_freshness"] = {"error": str(_fe)}
         finally:
             db.close()
     except Exception as e:

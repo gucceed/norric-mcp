@@ -16,3 +16,11 @@ app.autodiscover_tasks([
     "kreditvakt.signal_cross",
     "kreditvakt.contagion",
 ])
+
+# Kreditvakt scoring/briefing tasks live inside a register_tasks(app) factory
+# (kreditvakt/tasks.py), not at module top level, so autodiscover alone won't
+# bind them. Register explicitly so kreditvakt.tasks.score_portfolio et al.
+# exist on the worker.
+from kreditvakt.tasks import register_tasks as _register_kreditvakt_tasks  # noqa: E402
+
+_register_kreditvakt_tasks(app)
