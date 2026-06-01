@@ -1,0 +1,12 @@
+# Per-service Railway config for the kreditvakt-worker service.
+# Worker service -> Settings -> Config File path = /railway.worker.toml
+# The norric-mcp backend service keeps using railway.toml (python server.py)
+# and ignores this file. The Dockerfile build is shared; only the start
+# command differs (celery worker+beat instead of the API server).
+[build]
+builder = "dockerfile"
+
+[deploy]
+startCommand = "celery -A celeryapp worker -B -Q kreditvakt -l info"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10
