@@ -15,7 +15,7 @@ app.autodiscover_tasks([
     "ingestion.tasks.diarium_tasks",
     "kreditvakt.signal_cross",
     "kreditvakt.contagion",
-])
+], related_name=None, force=True)
 
 # Kreditvakt scoring/briefing tasks live inside a register_tasks(app) factory
 # (kreditvakt/tasks.py), not at module top level, so autodiscover alone won't
