@@ -35,7 +35,12 @@ def score_single(orgnr: str) -> dict:
     db = _get_db()
     try:
         result = score_from_db(db, orgnr)
-        write_score(db, result)
+        # Only persist real scores. A no_signals result carries null risk_*
+        # fields, which violate company_scores' NOT NULL constraints on
+        # distress_probability / risk_band / insolvency_score — no score to
+        # cache, nothing to persist (same rule as kreditvakt/api.py).
+        if result.get("score_source") == "live":
+            write_score(db, result)
         return {
             "orgnr": orgnr,
             "risk_band": result["risk_band"],
@@ -64,6 +69,7 @@ def score_portfolio(orgnr_list: list[str] | None = None) -> dict:
     db = _get_db()
     results = []
     errors = []
+    no_signals = 0
 
     try:
         if not orgnr_list:
@@ -77,23 +83,42 @@ def score_portfolio(orgnr_list: list[str] | None = None) -> dict:
             for orgnr in orgnr_list:
                 try:
                     result = score_from_db(db, orgnr)
-                    write_score(db, result)
-                    results.append({
-                        "orgnr": orgnr,
-                        "risk_band": result["risk_band"],
-                        "distress_probability": result["distress_probability"],
-                    })
+                    # Persist only real scores (see score_single). Orgnrs whose
+                    # signals have all decayed out of the live windows score as
+                    # no_signals and must not be written to company_scores.
+                    if result.get("score_source") == "live":
+                        write_score(db, result)
+                        results.append({
+                            "orgnr": orgnr,
+                            "risk_band": result["risk_band"],
+                            "distress_probability": result["distress_probability"],
+                        })
+                    else:
+                        no_signals += 1
                 except Exception as e:
+                    # Roll back so one failing company doesn't leave the
+                    # transaction aborted and poison every later statement in
+                    # the run (the InFailedSqlTransaction cascade).
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
                     log.error(f"[{orgnr}] portfolio scoring failed: {e}", exc_info=True)
                     errors.append({"orgnr": orgnr, "error": str(e)})
+            if no_signals:
+                log.info(
+                    "score_portfolio: %d orgnrs scored no_signals — not persisted",
+                    no_signals,
+                )
             ctx["rows_processed"] = len(orgnr_list)
             ctx["rows_updated"] = len(results)
-            ctx["rows_skipped"] = len(errors)
+            ctx["rows_skipped"] = len(errors) + no_signals
     finally:
         db.close()
 
     return {
         "scored": len(results),
+        "no_signals": no_signals,
         "errors": len(errors),
         "error_detail": errors[:50],
         "results": results,
