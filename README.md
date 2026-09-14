@@ -6,7 +6,7 @@ Sweden's B2B intelligence infrastructure — exposed as a single MCP server.
 
 **Products:** Norric SIGNAL · Norric Kreditvakt · Norric Vigil · SiteLoop · Sigvik
 **Framework:** FastMCP 3.2.3 · Streamable HTTP transport
-**Tools:** 21 tools across 5 products
+**Functions:** 25 registered functions; availability varies by function
 
 ---
 
@@ -40,7 +40,7 @@ curl -si https://mcp.norric.io/mcp \
 Missing key returns `401 {"error": "Missing API key…"}`.
 Wrong key returns `401 {"error": "Invalid API key…"}`.
 
-**Get a key:** https://norric.io/api
+**Get a key:** https://norric.io/api-keys
 
 ---
 
@@ -48,11 +48,11 @@ Wrong key returns `401 {"error": "Invalid API key…"}`.
 
 | Tier | Tools | Daily limit | Price |
 |------|-------|-------------|-------|
-| **Free** | `norric_status_v1`, `norric_data_freshness_v1` | 100 calls/day | Free |
-| **Standard** | All product tools (SIGNAL · Kreditvakt · Vigil · SiteLoop · Sigvik) + `norric_company_profile_v1` | 10,000 calls/day | Contact |
-| **Compliance** | Standard + `norric_explain_score_v1` (EU AI Act provenance) | Unlimited | Contact |
+| **Free** | `norric_status_v1` only | 10 calls/month; 5/minute | Free |
+| **Standard** | All registered tools | No monthly cap in current backend policy | Contact |
+| **Compliance** | Standard + audit-log access | No monthly cap in current backend policy | Contact |
 
-Standard and Compliance tiers are issued direct — email `hej@norric.io` for qualification,
+Standard and Compliance tiers are issued direct — email `edgar@norric.io` for qualification,
 pricing, and ToS. Public self-serve for paid tiers is paused pending kreditupplysningslagen
 (KuL) review for the Kreditvakt offering.
 
@@ -107,14 +107,14 @@ claude mcp add norric http://localhost:8080/mcp \
 
 ## Tools
 
-### Norric SIGNAL — Municipal procurement intelligence
+### Norric SIGNAL — Municipal procurement (registered, inactive)
 | Tool | Description |
 |------|-------------|
-| `signal_score_municipality_v1` | Score a municipality × vertical 0-100 |
-| `signal_weekly_call_list_v1` | Monday call list, ranked by score |
-| `signal_municipality_briefing_v1` | Full Swedish call briefing |
-| `signal_contract_expiry_alerts_v1` | Expiring contracts = displacement windows |
-| `signal_sweden_pulse_v1` | National procurement temperature |
+| `signal_score_municipality_v1` | Placeholder score; pipeline not connected |
+| `signal_weekly_call_list_v1` | Empty list until a live source is connected |
+| `signal_municipality_briefing_v1` | Empty briefing; ingestion not live |
+| `signal_contract_expiry_alerts_v1` | No results; contract database not connected |
+| `signal_sweden_pulse_v1` | Placeholder value; ingestion not live |
 
 ### Norric Kreditvakt — Insolvency intelligence
 | Tool | Description |
@@ -123,26 +123,27 @@ claude mcp add norric http://localhost:8080/mcp \
 | `kreditvakt_batch_score_v1` | Portfolio scoring, max 500 orgnrs |
 | `kreditvakt_debt_signals_v1` | Skatteverket restanslängd data |
 | `kreditvakt_bankruptcy_status_v1` | Bolagsverket konkurs status |
+| `kreditvakt_contagion_v1` | Ownership-network contagion signals |
 
-### Norric Vigil — Company lifecycle detection
+### Norric Vigil — Company lifecycle detection (registered, inactive)
 | Tool | Description |
 |------|-------------|
 | `vigil_lifecycle_stage_v1` | early / growth / scaling / distress |
 | `vigil_new_companies_v1` | New F-skatt registrations by municipality |
 | `vigil_ownership_velocity_v1` | Ownership change rate (distress signal) |
 
-### SiteLoop — Website pipeline
+### SiteLoop — Website pipeline (registered, inactive)
 | Tool | Description |
 |------|-------------|
 | `siteloop_pipeline_status_v1` | Funnel status by city |
 | `siteloop_submit_lead_v1` | Inject lead into pipeline (Vigil integration point) |
 
-### Sigvik — BRF property intelligence
+### Sigvik — BRF property intelligence (partial)
 | Tool | Description |
 |------|-------------|
 | `sigvik_score_brf_v1` | BRF financial health score |
-| `sigvik_brf_avgift_v1` | Monthly fee history and trend |
-| `sigvik_brf_flags_v1` | Renovation risk, energy class deadline flags |
+| `sigvik_brf_avgift_v1` | Empty data; avgift pipeline not connected |
+| `sigvik_brf_flags_v1` | Empty data; flag pipeline not connected |
 
 ### Cross-portfolio
 | Tool | Description |
@@ -151,6 +152,9 @@ claude mcp add norric http://localhost:8080/mcp \
 | `norric_status_v1` | Live status of all products and data pipelines |
 | `norric_explain_score_v1` | EU AI Act provenance chain for any score |
 | `norric_data_freshness_v1` | Data freshness per source registry |
+| `norric_score_v1` | Consolidated company risk score |
+| `norric_search_v1` | Company search by name or orgnr |
+| `norric_contagion_map_v1` | Ownership-network contagion view |
 
 ---
 
@@ -194,11 +198,12 @@ Every tool returns the same structure:
 MCP requires initializing a session before calling tools:
 
 ```bash
-# Step 1: Initialize (no auth required)
+# Step 1: Initialize (auth required)
 SESSION=$(curl -si \
   -X POST https://mcp.norric.io/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
+  -H "Authorization: Bearer nrc_your_api_key" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}' \
   | grep -i "mcp-session-id" | awk '{print $2}' | tr -d '\r')
 
@@ -215,8 +220,7 @@ curl -s -X POST https://mcp.norric.io/mcp \
 
 ## Current status
 
-Tools are live and callable. Ingestion pipelines are the next build step —
-connect each product's data source to activate live scoring.
+All functions are registered and callable for authorized tiers, but availability varies. Kreditvakt and the main Sigvik score are live; SIGNAL, Vigil, SiteLoop, Sigvik avgift, and Sigvik flags return empty or placeholder data until their pipelines are connected.
 
 Check live status: call `norric_status_v1`.
 
@@ -248,4 +252,4 @@ Check live status: call `norric_status_v1`.
 
 ---
 
-## Norric AB · Malmö · 2026
+## Norric · Solo founder · Edgar Mutebi · Malmö · 2026
