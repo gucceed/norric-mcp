@@ -1739,6 +1739,11 @@ async def norric_contagion_map(orgnr: str) -> dict:
 # ── Auth setup ─────────────────────────────────────────────────────────────────
 import logging
 
+# ── Norric Watch tools (watch/tools.py) — registered after all inline tools ──
+from watch.tools import register_watch_tools  # noqa: E402
+
+register_watch_tools(mcp)
+
 _NORRIC_API_KEYS_ENV = os.environ.get("NORRIC_API_KEYS", "")
 _VALID_KEYS = set(k.strip() for k in _NORRIC_API_KEYS_ENV.split(",") if k.strip())
 
