@@ -86,6 +86,18 @@ _FULL_BEAT_SCHEDULE = {
         "options": {"timezone": "Europe/Stockholm"},
     },
 
+    # ── T3: Norric Watch ─────────────────────────────────────────────────────
+    "watch-diff-daily": {
+        "task": "watch.diff_emit",
+        "schedule": crontab(hour=5, minute=45),
+        "options": {"timezone": "Europe/Stockholm"},
+    },
+    "watch-deliver-pending-1m": {
+        "task": "watch.deliver_pending",
+        "schedule": crontab(minute="*"),
+        "options": {"expires": 50},
+    },
+
     # ── T2: Vigil lifecycle detection ─────────────────────────────────────────
     # F-skatt registrations — nightly after Bolagsverket bulk
     "vigil-fskatt-nightly": {
@@ -158,6 +170,20 @@ _KREDITVAKT_BEAT_SCHEDULE = {
         "kwargs": {"orgnr_list": []},  # empty → score_portfolio loads the signal-bearing universe
         "options": {"queue": "kreditvakt"},
     },
+
+    # ── T3: Norric Watch ─────────────────────────────────────────────────────
+    # Diff emission — daily 05:45, after the portfolio rescore
+    "watch-diff-daily": {
+        "task": "watch.diff_emit",
+        "schedule": crontab(hour=5, minute=45),
+        "options": {"queue": "kreditvakt"},
+    },
+    # Signed delivery sweep — every minute (retry schedule is minute-grained)
+    "watch-deliver-pending-1m": {
+        "task": "watch.deliver_pending",
+        "schedule": crontab(minute="*"),
+        "options": {"queue": "kreditvakt", "expires": 50},
+    },
 }
 
 if CELERY_ROLE == "kreditvakt":
@@ -168,6 +194,8 @@ if CELERY_ROLE == "kreditvakt":
         "kreditvakt.tasks.score_portfolio":     {"queue": "kreditvakt"},
         "kreditvakt.tasks.score_single":        {"queue": "kreditvakt"},
         "kreditvakt.tasks.send_daily_briefing": {"queue": "kreditvakt"},
+        "watch.diff_emit":                    {"queue": "kreditvakt"},
+        "watch.deliver_pending":              {"queue": "kreditvakt"},
     }
     beat_schedule = _KREDITVAKT_BEAT_SCHEDULE
 else:

@@ -1739,6 +1739,11 @@ async def norric_contagion_map(orgnr: str) -> dict:
 # ── Auth setup ─────────────────────────────────────────────────────────────────
 import logging
 
+# ── Norric Watch tools (watch/tools.py) — registered after all inline tools ──
+from watch.tools import register_watch_tools  # noqa: E402
+
+register_watch_tools(mcp)
+
 _NORRIC_API_KEYS_ENV = os.environ.get("NORRIC_API_KEYS", "")
 _VALID_KEYS = set(k.strip() for k in _NORRIC_API_KEYS_ENV.split(",") if k.strip())
 
@@ -1959,18 +1964,21 @@ _mcp_asgi = mcp.http_app(json_response=True)
 
 from issuance.main import app as _issuance_app  # noqa: E402
 from kreditvakt.api import app as _kreditvakt_app  # noqa: E402
+from watch.api import app as _watch_app  # noqa: E402
 
 _ISSUANCE_PATHS = {"/signup/free", "/checkout", "/webhooks/stripe"}
 
 
 async def _router(scope, receive, send):
-    """Route /health, issuance paths, /api/* (kreditvakt), and everything else to FastMCP."""
+    """Route /health, issuance paths, /api/v1/watches (watch), /api/* (kreditvakt), and everything else to FastMCP."""
     if scope["type"] == "http":
         path = scope.get("path", "")
         if path == "/health":
             await _health_handler(scope, receive, send)
         elif path in _ISSUANCE_PATHS:
             await _issuance_app(scope, receive, send)
+        elif path.startswith("/api/v1/watches"):
+            await _watch_app(scope, receive, send)
         elif path.startswith("/api/"):
             await _kreditvakt_app(scope, receive, send)
         else:
