@@ -227,16 +227,16 @@ async def signal_weekly_call_list(
 
     return wrap(
         tool="signal_weekly_call_list_v1",
-        source=["munisignal.polsia.app"],
-            confidence=0.85,
+        source=["norric_signal_internal"],
+            confidence=0.0,
             ttl=43_200,
             data={
                 "vertikal": vertikal,
                 "week": datetime.now(timezone.utc).isocalendar()[1],
                 "entries": [],
-                "note": "Live via munisignal API - wiring complete",
+                "note": "SIGNAL ingestion pipeline is not connected.",
             },
-            warnings=[],
+            warnings=["SIGNAL ingestion pipeline not yet live."],
         )
 
 
