@@ -140,6 +140,19 @@ def create_watch(
     return serialize_watch(row, include_secret=True)
 
 
+def get_watch_row(db: Session, key_hash: str, watch_ref: str):
+    """Owner-scoped raw row INCLUDING signing_secret — internal use only
+    (test-event delivery needs the secret to sign). Never serialize this."""
+    return db.execute(
+        text("""
+            SELECT watch_ref, callback_url, signing_secret, status
+            FROM norric_watches
+            WHERE watch_ref = :wr AND key_hash = :kh
+        """),
+        {"wr": watch_ref, "kh": key_hash},
+    ).fetchone()
+
+
 def get_watch(db: Session, key_hash: str, watch_ref: str) -> Optional[dict]:
     """Owner-scoped fetch. Returns None for unknown OR foreign watch_refs —
     the two cases are indistinguishable to the caller on purpose."""
