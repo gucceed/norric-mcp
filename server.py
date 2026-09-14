@@ -1,7 +1,7 @@
 """
 norric-mcp/server.py
 
-Norric AB — Live MCP Server
+Norric — Live MCP Server
 Built with FastMCP 3.x · Streamable HTTP transport
 
 This is the single entry point. Run with:
@@ -131,7 +131,7 @@ MUNICIPALITY_NAMES = {
 mcp = FastMCP(
     name="Norric Intelligence MCP",
     instructions=(
-        "Norric AB — Swedish B2B intelligence infrastructure. "
+        "Norric — Swedish B2B intelligence infrastructure. "
         "Tools span municipal procurement signals (SIGNAL), company insolvency risk "
         "(Kreditvakt), business lifecycle detection (Vigil), website generation "
         "(SiteLoop), and BRF property intelligence (Sigvik). "
@@ -1458,7 +1458,7 @@ async def norric_status() -> dict:
             "products": {
                 "norric_signal": {
                     "status": "live_product_pipeline_pending",
-                    "url": "https://munisignal.polsia.app",
+                    "url": None,
                     "mcp_tools": 5,
                     "ingestion_live": False,
                     "note": "Product live. MCP tools ready. Ingestion pipeline to connect.",
@@ -1477,7 +1477,7 @@ async def norric_status() -> dict:
                 },
                 "siteloop": {
                     "status": "live_product_mcp_ready",
-                    "url": "https://siteloop.polsia.app",
+                    "url": None,
                     "mcp_tools": 2,
                     "pipeline_live": True,
                     "note": "Malmö pilot live. MCP tools ready to connect to pipeline DB.",
@@ -2028,3 +2028,4 @@ if __name__ == "__main__":
 """)
 
     uvicorn.run(app, host=host, port=port, log_level="info")
+
