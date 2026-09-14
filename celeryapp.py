@@ -27,3 +27,9 @@ app.autodiscover_tasks([
 from kreditvakt.tasks import register_tasks as _register_kreditvakt_tasks  # noqa: E402
 
 _register_kreditvakt_tasks(app)
+
+# Watch tasks (watch.diff_emit / watch.deliver_pending) use the same
+# register_tasks factory pattern as kreditvakt.
+from watch.tasks import register_tasks as _register_watch_tasks  # noqa: E402
+
+_register_watch_tasks(app)
