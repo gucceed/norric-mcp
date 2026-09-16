@@ -17,10 +17,11 @@ _FULL_BEAT_SCHEDULE = {
         "schedule": crontab(hour=3, minute=0),
         "options": {"timezone": "Europe/Stockholm"},
     },
-    # T1-01b Bolagsverket konkurs — daily 03:15 (after bulk; reuses cached zip)
+    # T1-01b Bolagsverket konkurs — daily 04:15 (staggered ~75 min after the
+    # 03:00 bulk INSERT so the two write bursts no longer overlap; reuses cached zip)
     "bolagsverket-konkurs-daily": {
         "task": "bolagsverket.konkurs_ingest",
-        "schedule": crontab(hour=3, minute=15),
+        "schedule": crontab(hour=4, minute=15),
         "options": {"timezone": "Europe/Stockholm"},
     },
     # T1-02 Skatteverket restanslängd — Monday 04:00
@@ -76,7 +77,10 @@ _FULL_BEAT_SCHEDULE = {
     "kreditvakt-nightly-rescore": {
         "task": "kreditvakt.tasks.score_portfolio",
         "schedule": crontab(hour=5, minute=30),
-        "kwargs": {"orgnr_list": []},  # empty list triggers full DB rescore via worker
+        # incremental: score only orgnrs with new signals since the last
+        # successful run, plus a 7-day staleness sweep (see score_portfolio).
+        # Pass {"orgnr_list": [], "incremental": False} for a manual full rescore.
+        "kwargs": {"orgnr_list": [], "incremental": True},
         "options": {"timezone": "Europe/Stockholm"},
     },
     # Daily briefing — 07:00 CET
@@ -157,17 +161,21 @@ _KREDITVAKT_BEAT_SCHEDULE = {
         "schedule": crontab(hour=3, minute=0),
         "options": {"queue": "kreditvakt"},
     },
-    # Bolagsverket konkurs signals — daily 03:15 (after bulk; refreshes scoring inputs)
+    # Bolagsverket konkurs signals — daily 04:15 (staggered ~75 min after the
+    # 03:00 bulk INSERT; refreshes scoring inputs ahead of the 05:30 rescore)
     "kreditvakt-bolagsverket-konkurs": {
         "task": "bolagsverket.konkurs_ingest",
-        "schedule": crontab(hour=3, minute=15),
+        "schedule": crontab(hour=4, minute=15),
         "options": {"queue": "kreditvakt"},
     },
-    # Portfolio rescore over the signal-bearing universe — daily 05:30
+    # Incremental portfolio rescore — daily 05:30
     "kreditvakt-score-portfolio": {
         "task": "kreditvakt.tasks.score_portfolio",
         "schedule": crontab(hour=5, minute=30),
-        "kwargs": {"orgnr_list": []},  # empty → score_portfolio loads the signal-bearing universe
+        # empty list + incremental → only orgnrs with signals created since the
+        # last successful run, plus a 7-day staleness sweep. Full rescore stays
+        # available by passing {"orgnr_list": [], "incremental": False}.
+        "kwargs": {"orgnr_list": [], "incremental": True},
         "options": {"queue": "kreditvakt"},
     },
 
