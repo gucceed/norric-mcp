@@ -56,12 +56,27 @@ def score_single(orgnr: str) -> dict:
 
 # ── Task: batch score portfolio ────────────────────────────────────────────────
 
-def score_portfolio(orgnr_list: list[str] | None = None) -> dict:
+def score_portfolio(
+    orgnr_list: list[str] | None = None,
+    incremental: bool = False,
+    stale_days: int = 7,
+) -> dict:
     """Score a batch of companies and record a norric_pipeline_runs row.
 
-    When ``orgnr_list`` is empty/None — which is what the nightly beat passes
-    (``{"orgnr_list": []}``) — score the full signal-bearing universe instead
-    of no-op'ing over an empty loop.
+    When ``orgnr_list`` is empty/None the universe is loaded from the DB:
+
+    * ``incremental=False`` — the full signal-bearing universe (~29k orgnrs).
+      This is the old nightly behaviour and stays available for manual runs.
+    * ``incremental=True`` — only orgnrs that plausibly need a new score:
+      signals created since the last successful run, plus any score older
+      than ``stale_days`` (the decay sweep), plus signal-bearing orgnrs with
+      no score row at all. This is what the nightly beat now passes; it cuts
+      the 05:30 full-universe rescore down to the actually-changed set, which
+      is the main lever on the overnight disk-IO burst.
+
+    In-place signal updates (e.g. konkurs ON CONFLICT upserts) do not bump
+    ``created_at``; the ``stale_days`` sweep is the net that re-scores those
+    companies within a week.
     """
     from scoring.kreditvakt import score_from_db, write_score
     from ingestion.pipeline_run import pipeline_run
@@ -73,11 +88,29 @@ def score_portfolio(orgnr_list: list[str] | None = None) -> dict:
 
     try:
         if not orgnr_list:
-            orgnr_list = _signal_bearing_orgnrs(db)
-            log.info(
-                "score_portfolio: empty list -> scoring %d signal-bearing orgnrs",
-                len(orgnr_list),
-            )
+            if incremental:
+                try:
+                    orgnr_list = _incremental_orgnrs(db, stale_days=stale_days)
+                except Exception as e:
+                    # A failed universe query must not kill the nightly rescore.
+                    # Fall back to the full signal-bearing universe (the old
+                    # nightly behaviour) — more IO for one night, no missed scores.
+                    db.rollback()
+                    log.error(
+                        "score_portfolio: incremental universe failed (%s) — falling back to full",
+                        e,
+                    )
+                    orgnr_list = _signal_bearing_orgnrs(db)
+                log.info(
+                    "score_portfolio: incremental -> scoring %d changed/stale orgnrs",
+                    len(orgnr_list),
+                )
+            else:
+                orgnr_list = _signal_bearing_orgnrs(db)
+                log.info(
+                    "score_portfolio: empty list -> scoring %d signal-bearing orgnrs",
+                    len(orgnr_list),
+                )
 
         with pipeline_run(db, "kreditvakt_score_portfolio") as ctx:
             for orgnr in orgnr_list:
@@ -273,3 +306,66 @@ def register_tasks(celery_app):
         return send_daily_briefing()
 
     return _score_single_task, _score_portfolio_task, _briefing_task
+
+
+def _incremental_orgnrs(db, stale_days: int = 7) -> list[str]:
+    """Universe for the nightly incremental rescore.
+
+    Three buckets, UNIONed:
+
+    1. changed  — orgnrs with payment/konkurs or active tax signals created
+       since the last successful ``kreditvakt_score_portfolio`` run (fallback
+       window: 36h, so a missed day does not silently drop changes).
+    2. stale    — orgnrs whose company_scores row is older than ``stale_days``.
+       Signal scores decay over time windows, so scores must be refreshed even
+       when nothing new was ingested; this spreads that refresh over a week
+       instead of one nightly burst. It also catches in-place signal updates
+       (konkurs upserts) that bucket 1 cannot see.
+    3. unscored — signal-bearing orgnrs with no company_scores row at all.
+    """
+    from sqlalchemy import text
+
+    rows = db.execute(
+        text("""
+            WITH last_run AS (
+                SELECT completed_at
+                FROM norric_pipeline_runs
+                WHERE pipeline = 'kreditvakt_score_portfolio'
+                  AND status = 'success'
+                  AND completed_at IS NOT NULL
+                ORDER BY completed_at DESC
+                LIMIT 1
+            ),
+            changed AS (
+                SELECT DISTINCT orgnr FROM norric_payment_signals
+                WHERE created_at >= COALESCE(
+                    (SELECT completed_at FROM last_run), now() - interval '36 hours')
+                UNION
+                SELECT DISTINCT orgnr FROM norric_tax_signals
+                WHERE is_active = true
+                  AND created_at >= COALESCE(
+                    (SELECT completed_at FROM last_run), now() - interval '36 hours')
+            ),
+            stale AS (
+                SELECT orgnr FROM company_scores
+                WHERE updated_at < now() - make_interval(days => :stale_days)
+            ),
+            unscored AS (
+                SELECT DISTINCT p.orgnr FROM norric_payment_signals p
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM company_scores cs WHERE cs.orgnr = p.orgnr)
+                UNION
+                SELECT DISTINCT t.orgnr FROM norric_tax_signals t
+                WHERE t.is_active = true
+                  AND NOT EXISTS (
+                    SELECT 1 FROM company_scores cs WHERE cs.orgnr = t.orgnr)
+            )
+            SELECT orgnr FROM changed
+            UNION
+            SELECT orgnr FROM stale
+            UNION
+            SELECT orgnr FROM unscored
+        """),
+        {"stale_days": stale_days},
+    ).fetchall()
+    return sorted(r[0] for r in rows if r[0])
