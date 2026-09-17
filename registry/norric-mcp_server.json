@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.gucceed/norric-mcp",
   "title": "Norric",
-  "description": "Swedish B2B intelligence for AI agents: 25 registered functions across insolvency risk, municipal procurement, BRF health, company lifecycle, leads, search, provenance, and data freshness. Availability varies by function and tier.",
+  "description": "Swedish B2B intelligence for AI agents: insolvency risk, procurement, BRF health and more.",
   "version": "2.0.0",
   "websiteUrl": "https://norric.io",
   "repository": {
