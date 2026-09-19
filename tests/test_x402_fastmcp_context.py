@@ -51,7 +51,7 @@ def test_paid_retry_metadata_reaches_wrapper_and_returns_settlement(monkeypatch)
     monkeypatch.setattr("x402.x402ResourceServer", FakeServer)
     monkeypatch.setattr("x402.mcp.create_payment_wrapper", fake_payment_wrapper)
 
-    decorator = x402_payments.build_data_freshness_wrapper({
+    decorator = x402_payments.build_tool_payment_wrapper("kreditvakt_score_company_v1", {
         "X402_TESTNET_ENABLED": "true",
         "X402_NETWORK": "eip155:84532",
         "X402_PAY_TO": "0x" + "1" * 40,
