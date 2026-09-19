@@ -57,3 +57,12 @@ proof: the payment itself provides the primary economic abuse control, while the
 bounded in-memory limiter prevents accidental rapid spend. A production-scale
 version should move the counter to the existing EU-hosted Redis service so the
 limit is shared across replicas.
+
+## Approved agent price bands
+
+Exact Base Sepolia prices are configured as atomic test USDC: lookup 2,000;
+signal 5,000; evidence 10,000; feed/batch 20,000; heavy synthesis 50,000.
+Tool assignments are data in `TOOL_PRICE_BANDS`. This change wires only
+`kreditvakt_score_company_v1`, the lightest live company score lookup, to the
+lookup band. Discovery, `norric_status_v1`, and `norric_data_freshness_v1` are
+free. Watchlist/event metering remains out of scope.
