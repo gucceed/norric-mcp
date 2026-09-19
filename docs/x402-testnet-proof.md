@@ -41,3 +41,19 @@ Options to assess later:
 No mainnet path should be enabled based only on marketing claims. Verify the
 ledger visibility, validator geography, RPC logs, facilitator logs, sanctions
 screening, custody and accounting treatment first.
+
+## Wallet-only MCP entry path
+
+Anonymous clients may initialize an MCP session, list tools, call the free
+`norric_status_v1` tool, and call the payment-gated
+`norric_data_freshness_v1` tool. Every other anonymous `tools/call` is rejected
+before FastMCP dispatch. The paid tool still challenges, verifies, executes once,
+and settles through x402. API-key sessions retain access to the full tool set.
+
+The anonymous paid path is Base Sepolia-only and inherits the hard mainnet block.
+As a simple abuse/spend sanity bound, a verified payer wallet may execute at most
+30 paid calls per process-hour. This is intentionally conservative for the
+proof: the payment itself provides the primary economic abuse control, while the
+bounded in-memory limiter prevents accidental rapid spend. A production-scale
+version should move the counter to the existing EU-hosted Redis service so the
+limit is shared across replicas.

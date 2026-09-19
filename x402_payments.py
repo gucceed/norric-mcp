@@ -8,11 +8,38 @@ and settlement goes to the configured public receiving address.
 from __future__ import annotations
 
 import os
+import time
+from collections import defaultdict, deque
 from collections.abc import Callable
 from typing import Any
 
 BASE_SEPOLIA = "eip155:84532"
 DEFAULT_FACILITATOR_URL = "https://x402.org/facilitator"
+_WALLET_WINDOW_SECONDS = 3600
+_WALLET_MAX_CALLS_PER_WINDOW = 30
+_wallet_calls: dict[str, deque[float]] = defaultdict(deque)
+
+
+def _payment_payer(payload: Any) -> str:
+    """Extract the EVM payer from an already verified exact payment payload."""
+    data = getattr(payload, "payload", {}) or {}
+    authorization = data.get("authorization", {}) if isinstance(data, dict) else {}
+    return str(authorization.get("from", "")).lower()
+
+
+def _allow_wallet_payment(payload: Any, now: float | None = None) -> bool:
+    """Bound a wallet to 30 paid tool executions/hour in this process."""
+    payer = _payment_payer(payload)
+    if not payer:
+        return False
+    timestamp = time.monotonic() if now is None else now
+    calls = _wallet_calls[payer]
+    while calls and calls[0] <= timestamp - _WALLET_WINDOW_SECONDS:
+        calls.popleft()
+    if len(calls) >= _WALLET_MAX_CALLS_PER_WINDOW:
+        return False
+    calls.append(timestamp)
+    return True
 
 
 class X402ConfigurationError(RuntimeError):
@@ -70,7 +97,7 @@ def build_data_freshness_wrapper(env: dict[str, str] | None = None) -> Callable[
 
     from x402 import ResourceConfig, x402ResourceServer
     from x402.http import HTTPFacilitatorClient
-    from x402.mcp import create_payment_wrapper
+    from x402.mcp import PaymentWrapperHooks, create_payment_wrapper
     from fastmcp import Context
     from x402.mechanisms.evm.exact import ExactEvmServerScheme
     from x402.schemas import ResourceInfo
@@ -91,6 +118,11 @@ def build_data_freshness_wrapper(env: dict[str, str] | None = None) -> Callable[
     payment_wrapper = create_payment_wrapper(
         resource_server,
         accepts=accepts,
+        hooks=PaymentWrapperHooks(
+            on_before_execution=lambda context: _allow_wallet_payment(
+                context.payment_payload
+            )
+        ),
         resource=ResourceInfo(
             url="mcp://tool/norric_data_freshness_v1",
             description="Current freshness of Norric public-data pipelines",
