@@ -74,11 +74,13 @@ def test_enabled_gate_builds_exact_sepolia_requirement(monkeypatch):
             captured["resource_config"] = config
             return ["requirement"]
 
-    sentinel = object()
+    async def sentinel(**kwargs):
+        return kwargs
 
-    def fake_wrapper(server, *, accepts, resource):
+    def fake_wrapper(server, *, accepts, resource, hooks):
         captured["accepts"] = accepts
         captured["resource"] = resource
+        captured["hooks"] = hooks
         return lambda handler: sentinel
 
     monkeypatch.setattr("x402.http.HTTPFacilitatorClient", FakeFacilitator)
@@ -92,7 +94,8 @@ def test_enabled_gate_builds_exact_sepolia_requirement(monkeypatch):
         "X402_FACILITATOR_URL": "https://facilitator.eu.example",
         "X402_DATA_FRESHNESS_PRICE": "$0.01",
     })
-    assert wrapper(lambda: None) is sentinel
+    wrapped = wrapper(lambda: None)
+    assert wrapped.__wrapped__ is sentinel
     assert captured["facilitator"] == {"url": "https://facilitator.eu.example"}
     assert captured["registered"] == BASE_SEPOLIA
     assert captured["initialized"] is True
@@ -101,3 +104,24 @@ def test_enabled_gate_builds_exact_sepolia_requirement(monkeypatch):
     assert captured["resource_config"].price == "$0.01"
     assert captured["resource_config"].max_timeout_seconds == 120
     assert captured["accepts"] == ["requirement"]
+
+
+def test_per_wallet_execution_limit_is_bounded():
+    import x402_payments
+    from types import SimpleNamespace
+
+    x402_payments._wallet_calls.clear()
+    payment = SimpleNamespace(payload={"authorization": {"from": "0xAbC"}})
+    for _ in range(x402_payments._WALLET_MAX_CALLS_PER_WINDOW):
+        assert x402_payments._allow_wallet_payment(payment, now=1000)
+    assert not x402_payments._allow_wallet_payment(payment, now=1000)
+    assert x402_payments._allow_wallet_payment(
+        payment, now=1000 + x402_payments._WALLET_WINDOW_SECONDS + 1
+    )
+
+
+def test_payment_without_payer_is_refused():
+    import x402_payments
+    from types import SimpleNamespace
+
+    assert not x402_payments._allow_wallet_payment(SimpleNamespace(payload={}), now=1000)
