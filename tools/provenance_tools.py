@@ -479,7 +479,7 @@ async def norric_data_freshness_v1(
 # Registration helper
 # ---------------------------------------------------------------------------
 
-def register_provenance_tools(mcp) -> None:
+def register_provenance_tools(mcp, data_freshness_wrapper=None) -> None:
     """
     Register both provenance tools with a FastMCP instance.
 
@@ -488,4 +488,7 @@ def register_provenance_tools(mcp) -> None:
         register_provenance_tools(mcp)
     """
     mcp.tool()(norric_explain_score_v1)
-    mcp.tool()(norric_data_freshness_v1)
+    freshness_handler = norric_data_freshness_v1
+    if data_freshness_wrapper is not None:
+        freshness_handler = data_freshness_wrapper(freshness_handler)
+    mcp.tool(name="norric_data_freshness_v1")(freshness_handler)
