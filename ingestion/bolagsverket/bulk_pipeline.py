@@ -22,6 +22,7 @@ import httpx
 
 from ingestion.db import Session
 from ingestion.bolagsverket.bulk_parser import parse_bulk_file
+from ingestion.bolagsverket.download_url import direct_download_url
 from ingestion.bolagsverket.bulk_writer import upsert_entities
 from ingestion.pipeline_run import pipeline_run
 
@@ -33,21 +34,9 @@ BULK_URL = os.environ.get(
     "nedladdningsbarafiler.2517.html",
 )
 
-DIRECT_DOWNLOAD_URL = os.environ.get(
-    "BOLAGSVERKET_DIRECT_URL",
-    # The actual zip URL — set this env var to the real download link
-    # obtained from Bolagsverket's open data page above.
-    "",
-)
-
 
 def _download_bulk_file(dest_dir: Path) -> Path:
-    url = DIRECT_DOWNLOAD_URL
-    if not url:
-        raise RuntimeError(
-            "BOLAGSVERKET_DIRECT_URL not set. "
-            "Obtain the bulk zip URL from the Bolagsverket open data page and set this variable."
-        )
+    url = direct_download_url()
 
     log.info("downloading bulk file from %s", url)
     with httpx.stream("GET", url, follow_redirects=True, timeout=300) as resp:
