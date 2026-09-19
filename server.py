@@ -616,6 +616,48 @@ async def swedish_company_verify(
     )
 
 
+@mcp.tool(
+    name="swedish_company_changes_v1",
+    description=(
+        "Return a normalized feed of source-backed Swedish company registry changes over "
+        "the last 1-30 days: new registrations, closures/deregistrations, renames, address "
+        "changes, and mergers when those facts exist in the Bolagsverket snapshot data. "
+        "Each event includes canonical identity, before/after fields, source freshness, and "
+        "evidence links. The tool never equates Norric first-seen time with legal registration "
+        "and never infers a merger from a rename. Filter by event type or orgnr; up to 100 events."
+    ),
+)
+@build_tool_payment_wrapper("swedish_company_changes_v1")
+async def swedish_company_changes(
+    days: int = 7,
+    event_types: Optional[list[str]] = None,
+    limit: int = 25,
+    orgnr: Optional[str] = None,
+) -> dict:
+    from changes.company import company_changes
+    from ingestion.db import Session
+    db = Session()
+    try:
+        result = company_changes(
+            db, days=days, event_types=event_types, limit=limit, orgnr=orgnr
+        )
+    except Exception as exc:
+        return wrap(
+            tool="swedish_company_changes_v1", source=[], confidence=0.0, ttl=0, data={},
+            warnings=[f"changes_error: {type(exc).__name__}: {exc}"],
+        )
+    finally:
+        db.close()
+    return wrap(
+        tool="swedish_company_changes_v1",
+        source=result["sources"],
+        confidence=result["confidence"],
+        ttl=3_600,
+        data=result["data"],
+        warnings=result["warnings"],
+    )
+
+
 # ── Supply-chain contagion ─────────────────────────────────────────────────────
 
 _CONTAGION_DISCLAIMER = (
@@ -1820,7 +1862,7 @@ _OPTIONAL_AUTH_PREFIX = "/api/score/"
 # Anonymous MCP is deliberately narrow: clients may establish a session and
 # discover tools, but may execute only the public status tool or the one x402
 # gated tool. Payment verification remains inside the tool wrapper.
-_ANONYMOUS_MCP_CALLS = {"norric_status_v1", "norric_data_freshness_v1", "kreditvakt_score_company_v1", "swedish_company_verify_v1"}
+_ANONYMOUS_MCP_CALLS = {"norric_status_v1", "norric_data_freshness_v1", "kreditvakt_score_company_v1", "swedish_company_verify_v1", "swedish_company_changes_v1"}
 _ANONYMOUS_MCP_METHODS = {"initialize", "notifications/initialized", "tools/list", "ping"}
 
 
