@@ -71,6 +71,7 @@ def build_data_freshness_wrapper(env: dict[str, str] | None = None) -> Callable[
     from x402 import ResourceConfig, x402ResourceServer
     from x402.http import HTTPFacilitatorClient
     from x402.mcp import create_payment_wrapper
+    from fastmcp import Context
     from x402.mechanisms.evm.exact import ExactEvmServerScheme
     from x402.schemas import ResourceInfo
 
@@ -87,7 +88,7 @@ def build_data_freshness_wrapper(env: dict[str, str] | None = None) -> Callable[
             maxTimeoutSeconds=120,
         )
     )
-    return create_payment_wrapper(
+    payment_wrapper = create_payment_wrapper(
         resource_server,
         accepts=accepts,
         resource=ResourceInfo(
@@ -98,3 +99,43 @@ def build_data_freshness_wrapper(env: dict[str, str] | None = None) -> Callable[
             tags=["sweden", "company-data", "freshness"],
         ),
     )
+
+    def fastmcp_context_compatible(handler: Callable) -> Callable:
+        """Bridge x402's legacy MCP types to standalone FastMCP 3."""
+        import functools
+        import inspect
+
+        from fastmcp.tools import ToolResult
+        from mcp.types import CallToolResult
+
+        x402_wrapped = payment_wrapper(handler)
+
+        @functools.wraps(x402_wrapped)
+        async def compatible(**kwargs: Any) -> Any:
+            result = await x402_wrapped(**kwargs)
+            if isinstance(result, CallToolResult):
+                return ToolResult(
+                    content=result.content,
+                    structured_content=result.structuredContent,
+                    meta=result.meta,
+                )
+            return result
+
+        signature = inspect.signature(x402_wrapped, follow_wrapped=False)
+        compatible.__signature__ = signature.replace(
+            parameters=[
+                parameter.replace(annotation=Context)
+                if parameter.name == "ctx"
+                else parameter
+                for parameter in signature.parameters.values()
+            ],
+            return_annotation=ToolResult,
+        )
+        compatible.__annotations__ = {
+            **getattr(x402_wrapped, "__annotations__", {}),
+            "ctx": Context,
+            "return": ToolResult,
+        }
+        return compatible
+
+    return fastmcp_context_compatible
