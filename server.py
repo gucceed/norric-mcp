@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastmcp import FastMCP
+from x402_payments import build_tool_payment_wrapper
 
 # ── Core envelope types (inline for single-file deployability) ─────────────────
 
@@ -451,6 +452,7 @@ def _kreditvakt_signals(r: dict) -> list[dict]:
         "Accepts a Swedish organisation number (e.g. 556000-1234)."
     ),
 )
+@build_tool_payment_wrapper("kreditvakt_score_company_v1")
 async def kreditvakt_score_company(
     orgnr: str,
 ) -> dict:
@@ -1504,9 +1506,7 @@ async def norric_status() -> dict:
 
 # ── Provenance tools ───────────────────────────────────────────────────────────
 from tools.provenance_tools import register_provenance_tools
-from x402_payments import build_data_freshness_wrapper
-
-register_provenance_tools(mcp, data_freshness_wrapper=build_data_freshness_wrapper())
+register_provenance_tools(mcp)
 
 
 # ── Norric Intelligence (cross-product) ────────────────────────────────────────
@@ -1761,7 +1761,7 @@ _OPTIONAL_AUTH_PREFIX = "/api/score/"
 # Anonymous MCP is deliberately narrow: clients may establish a session and
 # discover tools, but may execute only the public status tool or the one x402
 # gated tool. Payment verification remains inside the tool wrapper.
-_ANONYMOUS_MCP_CALLS = {"norric_status_v1", "norric_data_freshness_v1"}
+_ANONYMOUS_MCP_CALLS = {"norric_status_v1", "norric_data_freshness_v1", "kreditvakt_score_company_v1"}
 _ANONYMOUS_MCP_METHODS = {"initialize", "notifications/initialized", "tools/list", "ping"}
 
 
