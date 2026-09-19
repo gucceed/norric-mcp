@@ -26,6 +26,7 @@ PRICE_BANDS_ATOMIC = {
 TOOL_PRICE_BANDS = {
     "kreditvakt_score_company_v1": "lookup",
     "swedish_company_verify_v1": "lookup",
+    "swedish_company_changes_v1": "feed_batch",
 }
 _WALLET_WINDOW_SECONDS = 3600
 _WALLET_MAX_CALLS_PER_WINDOW = 30
