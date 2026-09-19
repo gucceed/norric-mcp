@@ -1504,7 +1504,9 @@ async def norric_status() -> dict:
 
 # ── Provenance tools ───────────────────────────────────────────────────────────
 from tools.provenance_tools import register_provenance_tools
-register_provenance_tools(mcp)
+from x402_payments import build_data_freshness_wrapper
+
+register_provenance_tools(mcp, data_freshness_wrapper=build_data_freshness_wrapper())
 
 
 # ── Norric Intelligence (cross-product) ────────────────────────────────────────
@@ -2036,4 +2038,3 @@ if __name__ == "__main__":
 """)
 
     uvicorn.run(app, host=host, port=port, log_level="info")
-
