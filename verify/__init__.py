@@ -1,0 +1,1 @@
+"""Norric company verification."""
