@@ -55,7 +55,7 @@ def test_anonymous_paid_tool_reaches_payment_wrapper(middleware):
     payload = {
         "jsonrpc": "2.0",
         "method": "tools/call",
-        "params": {"name": "norric_data_freshness_v1", "arguments": {}},
+        "params": {"name": "kreditvakt_score_company_v1", "arguments": {}},
     }
     sent = asyncio.run(_request(auth, payload))
     assert sent[0]["status"] == 200
