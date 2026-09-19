@@ -1758,6 +1758,39 @@ _OPEN_PATHS = {"/health", "/signup/free", "/checkout", "/webhooks/stripe"}
 # Invalid key → 401 (explicit rejection of bad credentials).
 _OPTIONAL_AUTH_PREFIX = "/api/score/"
 
+# Anonymous MCP is deliberately narrow: clients may establish a session and
+# discover tools, but may execute only the public status tool or the one x402
+# gated tool. Payment verification remains inside the tool wrapper.
+_ANONYMOUS_MCP_CALLS = {"norric_status_v1", "norric_data_freshness_v1"}
+_ANONYMOUS_MCP_METHODS = {"initialize", "notifications/initialized", "tools/list", "ping"}
+
+
+async def _read_jsonrpc_body(receive):
+    """Buffer one MCP request so auth can inspect it and downstream can replay it."""
+    import json
+
+    messages = []
+    body = b""
+    while True:
+        message = await receive()
+        messages.append(message)
+        if message.get("type") != "http.request":
+            break
+        body += message.get("body", b"")
+        if not message.get("more_body", False):
+            break
+    try:
+        payload = json.loads(body or b"{}")
+    except (ValueError, TypeError):
+        payload = None
+
+    async def replay():
+        if messages:
+            return messages.pop(0)
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    return payload, replay
+
 
 class _NorricAuthMiddleware:
     """
@@ -1809,6 +1842,29 @@ class _NorricAuthMiddleware:
             scope["norric_tier"]        = "free"
             scope["norric_auth_source"] = "anonymous"
             await self.app(scope, receive, send)
+            return
+
+        # Wallet-only MCP entry path. This bypasses API-key authentication,
+        # never payment verification. Only the explicit public/x402 tool set can
+        # execute; malformed and all other calls fail closed before FastMCP.
+        if path == "/mcp" and not has_key:
+            payload, replay = await _read_jsonrpc_body(receive)
+            method = payload.get("method") if isinstance(payload, dict) else None
+            tool_name = (payload.get("params") or {}).get("name") if isinstance(payload, dict) else None
+            allowed = method in _ANONYMOUS_MCP_METHODS or (
+                method == "tools/call" and tool_name in _ANONYMOUS_MCP_CALLS
+            )
+            if allowed:
+                scope["norric_tier"] = "wallet"
+                scope["norric_auth_source"] = "anonymous_x402"
+                await self.app(scope, replay, send)
+                return
+            from starlette.responses import JSONResponse
+            resp = JSONResponse(
+                {"error": "Anonymous MCP may call only public or payment-gated tools"},
+                status_code=403,
+            )
+            await resp(scope, replay, send)
             return
 
         # All other paths (and scoring with a key): require valid token
