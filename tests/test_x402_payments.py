@@ -21,13 +21,11 @@ def test_valid_base_sepolia_config():
         "X402_NETWORK": BASE_SEPOLIA,
         "X402_PAY_TO": "0x" + "1" * 40,
         "X402_FACILITATOR_URL": "https://facilitator.eu.example",
-        "X402_DATA_FRESHNESS_PRICE": "$0.01",
     })
     assert config == {
         "network": BASE_SEPOLIA,
         "pay_to": "0x" + "1" * 40,
         "facilitator_url": "https://facilitator.eu.example",
-        "price": "$0.01",
     }
 
 
@@ -87,12 +85,11 @@ def test_enabled_gate_builds_exact_sepolia_requirement(monkeypatch):
     monkeypatch.setattr("x402.x402ResourceServer", FakeServer)
     monkeypatch.setattr("x402.mcp.create_payment_wrapper", fake_wrapper)
 
-    wrapper = x402_payments.build_data_freshness_wrapper({
+    wrapper = x402_payments.build_tool_payment_wrapper("kreditvakt_score_company_v1", {
         "X402_TESTNET_ENABLED": "true",
         "X402_NETWORK": BASE_SEPOLIA,
         "X402_PAY_TO": "0x" + "1" * 40,
         "X402_FACILITATOR_URL": "https://facilitator.eu.example",
-        "X402_DATA_FRESHNESS_PRICE": "$0.01",
     })
     wrapped = wrapper(lambda: None)
     assert wrapped.__wrapped__ is sentinel
@@ -101,7 +98,7 @@ def test_enabled_gate_builds_exact_sepolia_requirement(monkeypatch):
     assert captured["initialized"] is True
     assert captured["resource_config"].network == BASE_SEPOLIA
     assert captured["resource_config"].pay_to == "0x" + "1" * 40
-    assert captured["resource_config"].price == "$0.01"
+    assert captured["resource_config"].price.amount == "2000"
     assert captured["resource_config"].max_timeout_seconds == 120
     assert captured["accepts"] == ["requirement"]
 
@@ -125,3 +122,33 @@ def test_payment_without_payer_is_refused():
     from types import SimpleNamespace
 
     assert not x402_payments._allow_wallet_payment(SimpleNamespace(payload={}), now=1000)
+
+
+def test_approved_price_bands_are_exact_and_valid():
+    import x402_payments
+
+    x402_payments.validate_price_bands()
+    assert x402_payments.PRICE_BANDS_ATOMIC == {
+        "lookup": 2_000,
+        "signal": 5_000,
+        "evidence": 10_000,
+        "feed_batch": 20_000,
+        "heavy": 50_000,
+    }
+    assert x402_payments.TOOL_PRICE_BANDS == {
+        "kreditvakt_score_company_v1": "lookup"
+    }
+
+
+def test_invalid_price_band_is_rejected(monkeypatch):
+    import x402_payments
+
+    monkeypatch.setattr(x402_payments, "PRICE_BANDS_ATOMIC", {
+        "lookup": 5_000,
+        "signal": 2_000,
+        "evidence": 10_000,
+        "feed_batch": 20_000,
+        "heavy": 50_000,
+    })
+    with pytest.raises(X402ConfigurationError, match="increasing"):
+        x402_payments.validate_price_bands()
