@@ -557,6 +557,65 @@ async def kreditvakt_score_company(
     )
 
 
+
+
+@mcp.tool(
+    name="swedish_company_verify_v1",
+    description=(
+        "Verify a Swedish company against official registry data. One orgnr (556000-1234) or "
+        "company name in, one normalized cited answer out: canonical identity (name, orgnr, "
+        "orgform, registered address), legal status (active/deregistered with date), F-tax "
+        "registration where tracked, insolvency flags (konkurs filings, Kronofogden payment "
+        "orders, tax-debt listing), the cached Kreditvakt risk band when present, the latest "
+        "recorded Bolagsverket registry changes, and per-source observation timestamps with "
+        "evidence links. verified=true means the orgnr exists in the Bolagsverket registry "
+        "mirror and is currently active. Fields Norric does not track (VAT/moms, employer "
+        "registration) return status 'not_tracked' — never a fabricated value. "
+        "Use this as the first diligence call before kreditvakt_score_company_v1."
+    ),
+)
+@build_tool_payment_wrapper("swedish_company_verify_v1")
+async def swedish_company_verify(
+    orgnr_or_name: str,
+) -> dict:
+    """
+    Verify a Swedish company against the official registry mirror.
+
+    Args:
+        orgnr_or_name: Swedish organisation number (e.g. 556703-7485) or a
+                       company name (e.g. "Spotify"). Ambiguous names return
+                       candidates instead of guessing.
+    """
+    # NO MOCK FALLBACK. verify_company returns found/ambiguous/not-found dicts
+    # or raises (SCHEMA_MISSING / DB error) — never fabricates.
+    from ingestion.db import Session
+    from verify.company import verify_company
+    db = Session()
+    try:
+        result = verify_company(db, orgnr_or_name)
+    except Exception as exc:
+        return wrap(
+            tool="swedish_company_verify_v1",
+            source=[],
+            confidence=0.0,
+            ttl=0,
+            data={},
+            warnings=[f"verify_error: {type(exc).__name__}"],
+        )
+    finally:
+        db.close()
+
+    return wrap(
+        tool="swedish_company_verify_v1",
+        source=result["sources"],
+        confidence=result["confidence"],
+        ttl=3_600,
+        data=result["data"],
+        signals=result.get("signals", []),
+        warnings=result.get("warnings", []),
+    )
+
+
 # ── Supply-chain contagion ─────────────────────────────────────────────────────
 
 _CONTAGION_DISCLAIMER = (
@@ -1761,7 +1820,7 @@ _OPTIONAL_AUTH_PREFIX = "/api/score/"
 # Anonymous MCP is deliberately narrow: clients may establish a session and
 # discover tools, but may execute only the public status tool or the one x402
 # gated tool. Payment verification remains inside the tool wrapper.
-_ANONYMOUS_MCP_CALLS = {"norric_status_v1", "norric_data_freshness_v1", "kreditvakt_score_company_v1"}
+_ANONYMOUS_MCP_CALLS = {"norric_status_v1", "norric_data_freshness_v1", "kreditvakt_score_company_v1", "swedish_company_verify_v1"}
 _ANONYMOUS_MCP_METHODS = {"initialize", "notifications/initialized", "tools/list", "ping"}
 
 
@@ -1918,7 +1977,7 @@ class _NorricAuthMiddleware:
 async def _health_handler(scope, receive, send):
     from starlette.responses import JSONResponse
 
-    health = {"status": "ok", "mcp_tools": 25, "version": "2.0.0"}
+    health = {"status": "ok", "mcp_tools": 26, "version": "2.0.0"}
 
     # Query DB for product health stats
     try:
