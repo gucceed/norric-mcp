@@ -99,6 +99,7 @@ def test_enabled_gate_builds_exact_sepolia_requirement(monkeypatch):
     assert captured["resource_config"].network == BASE_SEPOLIA
     assert captured["resource_config"].pay_to == "0x" + "1" * 40
     assert captured["resource_config"].price.amount == "2000"
+    assert captured["resource_config"].price.asset == x402_payments.BASE_SEPOLIA_USDC
     assert captured["resource_config"].max_timeout_seconds == 120
     assert captured["accepts"] == ["requirement"]
 
