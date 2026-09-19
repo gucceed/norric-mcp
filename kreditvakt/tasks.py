@@ -294,9 +294,16 @@ def register_tasks(celery_app):
         bind=True,
         max_retries=1,
     )
-    def _score_portfolio_task(self, orgnr_list: list[str]) -> dict:
+    def _score_portfolio_task(
+        self,
+        orgnr_list: list[str],
+        incremental: bool = False,
+        stale_days: int = 7,
+    ) -> dict:
         try:
-            return score_portfolio(orgnr_list)
+            return score_portfolio(
+                orgnr_list, incremental=incremental, stale_days=stale_days
+            )
         except Exception as exc:
             log.error(f"score_portfolio failed: {exc}")
             raise self.retry(exc=exc)

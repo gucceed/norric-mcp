@@ -38,6 +38,7 @@ from typing import Optional
 import httpx
 
 from ingestion.db import Session
+from ingestion.bolagsverket.download_url import direct_download_url
 from ingestion.bolagsverket.konkurs_parser import (
     DEFAULT_ORG_FORMS,
     parse_konkurs_events,
@@ -46,8 +47,6 @@ from ingestion.bolagsverket.konkurs_writer import upsert_konkurs_records
 from ingestion.pipeline_run import pipeline_run
 
 log = logging.getLogger(__name__)
-
-DIRECT_DOWNLOAD_URL = os.environ.get("BOLAGSVERKET_DIRECT_URL", "")
 
 CACHE_DIR = Path(os.environ.get("BOLAGSVERKET_CACHE_DIR", "/tmp/bolagsverket-cache"))
 RETENTION_DAYS = int(os.environ.get("BOLAGSVERKET_RETENTION_DAYS", "7"))
@@ -68,20 +67,14 @@ def _prune_cache(retention_days: int = RETENTION_DAYS) -> None:
 
 def _download_bulk_zip(dest_dir: Path) -> Path:
     """Download bulk zip to dest_dir. Uses BOLAGSVERKET_DIRECT_URL."""
-    if not DIRECT_DOWNLOAD_URL:
-        raise RuntimeError(
-            "BOLAGSVERKET_DIRECT_URL not set on this service. "
-            "Per Phase 2 of the konkurs ingestor build, set it to: "
-            "https://vardefulla-datamangder.bolagsverket.se/bolagsverket/"
-            "bolagsverket_bulkfil.zip"
-        )
+    url = direct_download_url()
 
     zip_path = dest_dir / "bolagsverket_bulkfil.zip"
-    log.info("downloading bulk file from %s", DIRECT_DOWNLOAD_URL)
+    log.info("downloading bulk file from %s", url)
     t0 = time.monotonic()
     with httpx.stream(
         "GET",
-        DIRECT_DOWNLOAD_URL,
+        url,
         follow_redirects=True,
         timeout=600,
     ) as resp:
