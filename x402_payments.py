@@ -14,6 +14,7 @@ from collections.abc import Callable
 from typing import Any
 
 BASE_SEPOLIA = "eip155:84532"
+BASE_SEPOLIA_USDC = "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
 DEFAULT_FACILITATOR_URL = "https://x402.org/facilitator"
 PRICE_BANDS_ATOMIC = {
     "lookup": 2_000,
@@ -137,7 +138,7 @@ def build_tool_payment_wrapper(tool_name: str, env: dict[str, str] | None = None
             scheme="exact",
             network=BASE_SEPOLIA,
             payTo=config["pay_to"],
-            price=AssetAmount(amount=str(price_atomic), asset="USDC"),
+            price=AssetAmount(amount=str(price_atomic), asset=BASE_SEPOLIA_USDC),
             maxTimeoutSeconds=120,
         )
     )
