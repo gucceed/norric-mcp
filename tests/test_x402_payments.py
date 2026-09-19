@@ -139,7 +139,8 @@ def test_approved_price_bands_are_exact_and_valid():
         "heavy": 50_000,
     }
     assert x402_payments.TOOL_PRICE_BANDS == {
-        "kreditvakt_score_company_v1": "lookup"
+        "kreditvakt_score_company_v1": "lookup",
+        "swedish_company_verify_v1": "lookup",
     }
 
 
