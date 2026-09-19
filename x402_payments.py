@@ -15,6 +15,16 @@ from typing import Any
 
 BASE_SEPOLIA = "eip155:84532"
 DEFAULT_FACILITATOR_URL = "https://x402.org/facilitator"
+PRICE_BANDS_ATOMIC = {
+    "lookup": 2_000,
+    "signal": 5_000,
+    "evidence": 10_000,
+    "feed_batch": 20_000,
+    "heavy": 50_000,
+}
+TOOL_PRICE_BANDS = {
+    "kreditvakt_score_company_v1": "lookup",
+}
 _WALLET_WINDOW_SECONDS = 3600
 _WALLET_MAX_CALLS_PER_WINDOW = 30
 _wallet_calls: dict[str, deque[float]] = defaultdict(deque)
@@ -78,24 +88,40 @@ def validate_testnet_config(env: dict[str, str] | None = None) -> dict[str, str]
         "network": network,
         "pay_to": pay_to,
         "facilitator_url": facilitator_url,
-        "price": values.get("X402_DATA_FRESHNESS_PRICE", "$0.01").strip() or "$0.01",
     }
 
 
-def build_data_freshness_wrapper(env: dict[str, str] | None = None) -> Callable[[Callable], Callable]:
+def validate_price_bands() -> None:
+    """Fail closed on malformed or non-increasing exact-price bands."""
+    expected = ("lookup", "signal", "evidence", "feed_batch", "heavy")
+    if tuple(PRICE_BANDS_ATOMIC) != expected:
+        raise X402ConfigurationError("x402 price bands must use the approved order")
+    prices = tuple(PRICE_BANDS_ATOMIC.values())
+    if any(not isinstance(price, int) or price <= 0 for price in prices):
+        raise X402ConfigurationError("x402 price bands must be positive atomic integers")
+    if prices != tuple(sorted(set(prices))):
+        raise X402ConfigurationError("x402 price bands must be unique and increasing")
+    if any(band not in PRICE_BANDS_ATOMIC for band in TOOL_PRICE_BANDS.values()):
+        raise X402ConfigurationError("every paid tool must reference a known price band")
+
+
+def build_tool_payment_wrapper(tool_name: str, env: dict[str, str] | None = None) -> Callable[[Callable], Callable]:
     """Build a payment decorator, or a no-op while the proof is disabled.
 
-    The wrapper is limited to ``norric_data_freshness_v1`` by its call site. API
-    key auth remains in front of MCP during this proof, so no other tool becomes
-    anonymous. A later migration can make paid MCP calls an alternative auth
-    path after the testnet flow is proven.
+    Tool-to-band assignment is data in ``TOOL_PRICE_BANDS``. Only explicitly
+    assigned tools are payable; discovery, status and freshness remain free.
     """
     if not _enabled(env):
         return lambda handler: handler
 
     config = validate_testnet_config(env)
+    validate_price_bands()
+    band = TOOL_PRICE_BANDS.get(tool_name)
+    if band is None:
+        raise X402ConfigurationError(f"no approved x402 price band for {tool_name!r}")
+    price_atomic = PRICE_BANDS_ATOMIC[band]
 
-    from x402 import ResourceConfig, x402ResourceServer
+    from x402 import AssetAmount, ResourceConfig, x402ResourceServer
     from x402.http import HTTPFacilitatorClient
     from x402.mcp import PaymentWrapperHooks, create_payment_wrapper
     from fastmcp import Context
@@ -111,7 +137,7 @@ def build_data_freshness_wrapper(env: dict[str, str] | None = None) -> Callable[
             scheme="exact",
             network=BASE_SEPOLIA,
             payTo=config["pay_to"],
-            price=config["price"],
+            price=AssetAmount(amount=str(price_atomic), asset="USDC"),
             maxTimeoutSeconds=120,
         )
     )
@@ -124,8 +150,8 @@ def build_data_freshness_wrapper(env: dict[str, str] | None = None) -> Callable[
             )
         ),
         resource=ResourceInfo(
-            url="mcp://tool/norric_data_freshness_v1",
-            description="Current freshness of Norric public-data pipelines",
+            url=f"mcp://tool/{tool_name}",
+            description=f"Norric paid tool: {tool_name}",
             mime_type="application/json",
             service_name="Norric",
             tags=["sweden", "company-data", "freshness"],
@@ -171,3 +197,8 @@ def build_data_freshness_wrapper(env: dict[str, str] | None = None) -> Callable[
         return compatible
 
     return fastmcp_context_compatible
+
+
+# Backwards-compatible import for old callers; freshness is intentionally free.
+def build_data_freshness_wrapper(env=None):
+    return lambda handler: handler
