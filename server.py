@@ -1860,7 +1860,7 @@ class _NorricAuthMiddleware:
 async def _health_handler(scope, receive, send):
     from starlette.responses import JSONResponse
 
-    health = {"status": "ok", "mcp_tools": 21, "version": "2.0.0"}
+    health = {"status": "ok", "mcp_tools": 25, "version": "2.0.0"}
 
     # Query DB for product health stats
     try:
@@ -2036,4 +2036,3 @@ if __name__ == "__main__":
 """)
 
     uvicorn.run(app, host=host, port=port, log_level="info")
-
