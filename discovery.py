@@ -86,6 +86,17 @@ HTTP_PAID_ROUTES = {
             {"name": "cvr_number", "in": "query", "schema": {"type": "string"}},
         ],
     },
+    "/x402/no/company/verify": {
+        "tool": "norwegian_company_verify_v1", "summary": "Verify a Norwegian organisation against Enhetsregisteret",
+        "description": "Returns normalized Norwegian organisation identity, legal status, evidence and source timestamps.", "tag": "Paid Norwegian company intelligence",
+        "parameters": [{"name": "orgnr_or_name", "in": "query", "required": True, "schema": {"type": "string", "minLength": 2}, "description": "Norwegian organisation number (9 digits) or company name."}],
+    },
+    "/x402/no/company/changes": {
+        "tool": "norwegian_company_changes_v1", "summary": "Read recent Norwegian organisation registry changes",
+        "description": "Returns source-backed Norwegian registrations, closures, renames, address changes, bankruptcy and liquidation changes.", "tag": "Paid Norwegian company intelligence",
+        "parameters": [{"name":"days","in":"query","schema":{"type":"integer","minimum":1,"maximum":30,"default":7}}, {"name":"event_types","in":"query","schema":{"type":"array","items":{"type":"string"}}}, {"name":"limit","in":"query","schema":{"type":"integer","minimum":1,"maximum":100,"default":25}}, {"name":"org_number","in":"query","schema":{"type":"string"}}],
+    },
+
 }
 
 
@@ -209,6 +220,11 @@ async def execute_route(path: str, scope: dict[str, Any], handlers: dict[str, Ca
             kwargs = {"orgnr_or_name": values["orgnr_or_name"][0]}
         elif path == "/x402/dk/company/verify":
             kwargs = {"cvr_or_name": values["cvr_or_name"][0]}
+        elif path == "/x402/no/company/verify":
+            kwargs = {"orgnr_or_name": values["orgnr_or_name"][0]}
+        elif path == "/x402/no/company/changes":
+            kwargs = {"days": int(values.get("days", ["7"])[0]), "event_types": values.get("event_types") or None, "limit": int(values.get("limit", ["25"])[0]), "org_number": (values.get("org_number") or [None])[0]}
+            if not 1 <= kwargs["days"] <= 30 or not 1 <= kwargs["limit"] <= 100: raise ValueError("days must be 1-30 and limit must be 1-100")
         elif path == "/x402/dk/company/changes":
             kwargs = {
                 "days": int(values.get("days", ["7"])[0]),
