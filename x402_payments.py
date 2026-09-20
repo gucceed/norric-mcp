@@ -29,6 +29,8 @@ TOOL_PRICE_BANDS = {
     "swedish_company_changes_v1": "feed_batch",
     "danish_company_verify_v1": "lookup",
     "danish_company_changes_v1": "feed_batch",
+    "norwegian_company_verify_v1": "lookup",
+    "norwegian_company_changes_v1": "feed_batch",
 }
 _WALLET_WINDOW_SECONDS = 3600
 _WALLET_MAX_CALLS_PER_WINDOW = 30
@@ -278,6 +280,18 @@ def build_http_payment_middleware(app, env: dict[str, str] | None = None):
                     "cvr_number": {"type": "string"},
                 },
             },
+        },
+        "GET /x402/no/company/verify": {
+            "tool": "norwegian_company_verify_v1",
+            "tags": ["norway", "company-data", "registry"],
+            "example": {"orgnr_or_name": "Equinor"},
+            "schema": {"properties": {"orgnr_or_name": {"type": "string", "description": "Norwegian organisation number (9 digits) or company name"}}, "required": ["orgnr_or_name"]},
+        },
+        "GET /x402/no/company/changes": {
+            "tool": "norwegian_company_changes_v1",
+            "tags": ["norway", "company-data", "registry"],
+            "example": {"days": 7, "limit": 25},
+            "schema": {"properties": {"days": {"type": "integer", "minimum": 1, "maximum": 30}, "event_types": {"type": "array", "items": {"type": "string"}}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}, "org_number": {"type": "string"}}},
         },
     }
     routes = {}
