@@ -4,6 +4,12 @@ All notable changes to norric-mcp.
 
 ## Unreleased
 
+- Added Norway country three: `norwegian_company_verify_v1` ($0.002) and
+  `norwegian_company_changes_v1` ($0.02), official Brønnøysund daily bulk,
+  update-feed deltas and nightly reconciliation. Added NLOD evidence, NO schema,
+  anonymous wallet access and `/x402/no/company/*` discovery routes. No
+  role/person or beneficial-owner data.
+
 ### Added
 
 - **Denmark country two:** CVR (Datafordeler) pipeline and two paid tools.
