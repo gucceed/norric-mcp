@@ -71,3 +71,33 @@ def test_health_tool_count_is_dynamic(monkeypatch):
     monkeypatch.setattr(server.mcp, "list_tools", fake_list_tools)
     sent = _request(server._health_handler, "/health")
     assert _body(sent)["mcp_tools"] == 32
+
+
+def test_changes_openapi_has_each_parameter_once():
+    from discovery import openapi_document
+    params = openapi_document()["paths"]["/x402/company/changes"]["get"]["parameters"]
+    assert [item["name"] for item in params] == ["days", "event_types", "limit", "orgnr"]
+
+
+def test_http_routes_declare_bazaar_input_and_output(monkeypatch):
+    monkeypatch.setattr("x402.http.x402_http_server.x402HTTPResourceServer.initialize", lambda self: None)
+    env = {
+        "X402_TESTNET_ENABLED": "true",
+        "X402_NETWORK": "eip155:84532",
+        "X402_PAY_TO": "0x1111111111111111111111111111111111111111",
+        "X402_FACILITATOR_URL": "https://facilitator.example.eu",
+    }
+    from x402_payments import build_http_payment_middleware
+
+    async def downstream(scope, receive, send):
+        pass
+
+    middleware = build_http_payment_middleware(downstream, env)
+    closure = [cell.cell_contents for cell in middleware._middleware.__closure__]
+    http_server = next(value for value in closure if value.__class__.__name__ == "x402HTTPResourceServer")
+    for compiled in http_server._compiled_routes:
+        bazaar = compiled.config.extensions["bazaar"]
+        assert bazaar["schema"]["properties"]["input"]
+        assert bazaar["schema"]["properties"]["output"]
+        assert bazaar["info"]["input"]["queryParams"]
+        assert bazaar["info"]["output"]["example"]
