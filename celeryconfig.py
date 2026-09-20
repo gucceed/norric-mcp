@@ -164,6 +164,11 @@ _FULL_BEAT_SCHEDULE = {
         "schedule": crontab(hour=6, minute=0),
         "options": {"timezone": "Europe/Stockholm", "expires": 3600},
     },
+    # NO: Brønnøysund Enhetsregisteret country three. Daily baseline plus deltas.
+    "brreg-bulk-daily": {"task": "brreg.bulk_ingest", "schedule": crontab(hour=7, minute=15), "options": {"timezone": "Europe/Stockholm", "expires": 10800}},
+    "brreg-updates-poll-15m": {"task": "brreg.updates_poll", "schedule": crontab(minute="7,22,37,52"), "options": {"expires": 600}},
+    "brreg-reconcile-nightly": {"task": "brreg.reconcile_nightly", "schedule": crontab(hour=6, minute=30), "options": {"timezone": "Europe/Stockholm", "expires": 3600}},
+
 }
 
 # ── Role-scoped beat / queue selection ────────────────────────────────────────
