@@ -218,6 +218,7 @@ def build_http_payment_middleware(app, env: dict[str, str] | None = None):
 
     from x402 import AssetAmount, x402ResourceServer
     from x402.http import HTTPFacilitatorClient
+    from x402.extensions.bazaar import OutputConfig, declare_discovery_extension
     from x402.http.middleware.fastapi import PaymentMiddlewareASGI
     from x402.mechanisms.evm.exact import ExactEvmServerScheme
 
@@ -226,12 +227,38 @@ def build_http_payment_middleware(app, env: dict[str, str] | None = None):
     resource_server.register(BASE_SEPOLIA, ExactEvmServerScheme())
 
     route_tools = {
-        "GET /x402/company/score": "kreditvakt_score_company_v1",
-        "GET /x402/company/verify": "swedish_company_verify_v1",
-        "GET /x402/company/changes": "swedish_company_changes_v1",
+        "GET /x402/company/score": {
+            "tool": "kreditvakt_score_company_v1",
+            "example": {"orgnr": "556703-7485"},
+            "schema": {
+                "properties": {"orgnr": {"type": "string", "description": "Swedish organisation number or company name"}},
+                "required": ["orgnr"],
+            },
+        },
+        "GET /x402/company/verify": {
+            "tool": "swedish_company_verify_v1",
+            "example": {"orgnr_or_name": "Spotify"},
+            "schema": {
+                "properties": {"orgnr_or_name": {"type": "string", "description": "Swedish organisation number or company name"}},
+                "required": ["orgnr_or_name"],
+            },
+        },
+        "GET /x402/company/changes": {
+            "tool": "swedish_company_changes_v1",
+            "example": {"days": 7, "limit": 25},
+            "schema": {
+                "properties": {
+                    "days": {"type": "integer", "minimum": 1, "maximum": 30},
+                    "event_types": {"type": "array", "items": {"type": "string"}},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                    "orgnr": {"type": "string"},
+                },
+            },
+        },
     }
     routes = {}
-    for route, tool_name in route_tools.items():
+    for route, metadata in route_tools.items():
+        tool_name = metadata["tool"]
         band = TOOL_PRICE_BANDS[tool_name]
         routes[route] = {
             "accepts": {
@@ -248,5 +275,22 @@ def build_http_payment_middleware(app, env: dict[str, str] | None = None):
             "mimeType": "application/json",
             "serviceName": "Norric",
             "tags": ["sweden", "company-data", "registry"],
+            "extensions": declare_discovery_extension(
+                input=metadata["example"],
+                input_schema=metadata["schema"],
+                output=OutputConfig(
+                    example={"data": {}, "metadata": {}, "signals": [], "warnings": []},
+                    schema={
+                        "type": "object",
+                        "required": ["data", "metadata", "signals", "warnings"],
+                        "properties": {
+                            "data": {"type": "object"},
+                            "metadata": {"type": "object"},
+                            "signals": {"type": "array"},
+                            "warnings": {"type": "array"},
+                        },
+                    },
+                ),
+            ),
         }
     return PaymentMiddlewareASGI(app, routes=routes, server=resource_server)
