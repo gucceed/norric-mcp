@@ -142,6 +142,8 @@ def test_approved_price_bands_are_exact_and_valid():
         "kreditvakt_score_company_v1": "lookup",
         "swedish_company_verify_v1": "lookup",
         "swedish_company_changes_v1": "feed_batch",
+        "danish_company_verify_v1": "lookup",
+        "danish_company_changes_v1": "feed_batch",
     }
 
 
