@@ -144,6 +144,8 @@ def test_approved_price_bands_are_exact_and_valid():
         "swedish_company_changes_v1": "feed_batch",
         "danish_company_verify_v1": "lookup",
         "danish_company_changes_v1": "feed_batch",
+        "norwegian_company_verify_v1": "lookup",
+        "norwegian_company_changes_v1": "feed_batch",
     }
 
 
