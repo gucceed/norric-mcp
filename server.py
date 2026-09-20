@@ -658,6 +658,108 @@ async def swedish_company_changes(
     )
 
 
+@mcp.tool(
+    name="danish_company_verify_v1",
+    description=(
+        "Verify a Danish company against official CVR registry data. One CVR number "
+        "(8 digits, e.g. 54562519) or company name in, one normalized cited answer out: "
+        "canonical identity (name, CVR number, virksomhedsform legal form, registered "
+        "address, hovedbranche industry), legal status (active/ceased with dates and "
+        "bitemporal registration timestamps), the latest recorded CVR registry changes, "
+        "and per-source observation timestamps with evidence links. Danish codes and "
+        "labels are canonical as issued by Erhvervsstyrelsen - never translated. "
+        "verified=true means the CVR number exists in the CVR registry mirror and is "
+        "currently active. Fields Norric does not track (VAT/moms, employer "
+        "registration) return status 'not_tracked' - never a fabricated value. "
+        "Source: Datafordeler CVR fildownload + CVR_Events, CC BY 4.0."
+    ),
+)
+@build_tool_payment_wrapper("danish_company_verify_v1")
+async def danish_company_verify(
+    cvr_or_name: str,
+) -> dict:
+    """
+    Verify a Danish company against the official CVR registry mirror.
+
+    Args:
+        cvr_or_name: Danish CVR number (8 digits, e.g. 54562519) or a company
+                     name (e.g. "LEGO"). Ambiguous names return candidates
+                     instead of guessing.
+    """
+    # NO MOCK FALLBACK. verify_company returns found/ambiguous/not-found dicts
+    # or raises - never fabricates.
+    from ingestion.db import Session
+    from verify.dk_company import verify_company
+    db = Session()
+    try:
+        result = verify_company(db, cvr_or_name)
+    except Exception as exc:
+        return wrap(
+            tool="danish_company_verify_v1",
+            source=[],
+            confidence=0.0,
+            ttl=0,
+            data={},
+            warnings=[f"verify_error: {type(exc).__name__}"],
+        )
+    finally:
+        db.close()
+
+    return wrap(
+        tool="danish_company_verify_v1",
+        source=result["sources"],
+        confidence=result["confidence"],
+        ttl=3_600,
+        data=result["data"],
+        signals=result.get("signals", []),
+        warnings=result.get("warnings", []),
+    )
+
+
+@mcp.tool(
+    name="danish_company_changes_v1",
+    description=(
+        "Return a normalized feed of source-backed Danish company registry changes over "
+        "the last 1-30 days: new registrations, closures/ophoer, renames, address "
+        "changes, and mergers when those facts exist in the CVR data (bulk baseline "
+        "diffs plus CVR_Events deltas). Each event includes canonical identity, "
+        "before/after fields, source freshness, and evidence links. The tool never "
+        "equates Norric first-seen time with legal registration and never infers a "
+        "merger from a rename. Filter by event type or CVR number; up to 100 events. "
+        "Source: Datafordeler CVR, CC BY 4.0."
+    ),
+)
+@build_tool_payment_wrapper("danish_company_changes_v1")
+async def danish_company_changes(
+    days: int = 7,
+    event_types: Optional[list[str]] = None,
+    limit: int = 25,
+    cvr_number: Optional[str] = None,
+) -> dict:
+    from changes.dk_company import company_changes
+    from ingestion.db import Session
+    db = Session()
+    try:
+        result = company_changes(
+            db, days=days, event_types=event_types, limit=limit, cvr_number=cvr_number
+        )
+    except Exception as exc:
+        return wrap(
+            tool="danish_company_changes_v1", source=[], confidence=0.0, ttl=0, data={},
+            warnings=[f"changes_error: {type(exc).__name__}: {exc}"],
+        )
+    finally:
+        db.close()
+    return wrap(
+        tool="danish_company_changes_v1",
+        source=result["sources"],
+        confidence=result["confidence"],
+        ttl=3_600,
+        data=result["data"],
+        warnings=result["warnings"],
+    )
+
+
 # ── Supply-chain contagion ─────────────────────────────────────────────────────
 
 _CONTAGION_DISCLAIMER = (
@@ -1863,7 +1965,7 @@ _OPTIONAL_AUTH_PREFIX = "/api/score/"
 # Anonymous MCP is deliberately narrow: clients may establish a session and
 # discover tools, but may execute only the public status tool or the one x402
 # gated tool. Payment verification remains inside the tool wrapper.
-_ANONYMOUS_MCP_CALLS = {"norric_status_v1", "norric_data_freshness_v1", "kreditvakt_score_company_v1", "swedish_company_verify_v1", "swedish_company_changes_v1"}
+_ANONYMOUS_MCP_CALLS = {"norric_status_v1", "norric_data_freshness_v1", "kreditvakt_score_company_v1", "swedish_company_verify_v1", "swedish_company_changes_v1", "danish_company_verify_v1", "danish_company_changes_v1"}
 _ANONYMOUS_MCP_METHODS = {"initialize", "notifications/initialized", "tools/list", "ping"}
 
 
@@ -2133,6 +2235,8 @@ _HTTP_PAID_HANDLERS = {
     "kreditvakt_score_company_v1": kreditvakt_score_company,
     "swedish_company_verify_v1": swedish_company_verify,
     "swedish_company_changes_v1": swedish_company_changes,
+    "danish_company_verify_v1": danish_company_verify,
+    "danish_company_changes_v1": danish_company_changes,
 }
 
 

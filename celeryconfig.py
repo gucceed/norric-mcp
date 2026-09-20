@@ -142,6 +142,28 @@ _FULL_BEAT_SCHEDULE = {
         "schedule": crontab(minute=30, hour="*/4"),
         "options": {"expires": 3600},
     },
+
+    # ── DK: CVR (Datafordeler) country two ───────────────────────────────────
+    # Weekly total-download baseline - generated Saturday night 03:00-06:00
+    # Danish time, archived after 7 days. Saturday 08:00 Europe/Stockholm.
+    "cvr-bulk-weekly": {
+        "task": "cvr.bulk_ingest",
+        "schedule": crontab(day_of_week=6, hour=8, minute=0),
+        "options": {"timezone": "Europe/Stockholm", "expires": 7200},
+    },
+    # CVR_Events deltas - every 15 minutes (operational target; Datafordeler
+    # publishes no numeric latency SLA for the event stream).
+    "cvr-events-poll-15m": {
+        "task": "cvr.events_poll",
+        "schedule": crontab(minute="*/15"),
+        "options": {"expires": 600},
+    },
+    # Nightly drift monitor: event-lag, freshness, baseline age.
+    "cvr-reconcile-nightly": {
+        "task": "cvr.reconcile_nightly",
+        "schedule": crontab(hour=6, minute=0),
+        "options": {"timezone": "Europe/Stockholm", "expires": 3600},
+    },
 }
 
 # ── Role-scoped beat / queue selection ────────────────────────────────────────

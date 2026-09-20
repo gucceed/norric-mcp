@@ -27,6 +27,8 @@ TOOL_PRICE_BANDS = {
     "kreditvakt_score_company_v1": "lookup",
     "swedish_company_verify_v1": "lookup",
     "swedish_company_changes_v1": "feed_batch",
+    "danish_company_verify_v1": "lookup",
+    "danish_company_changes_v1": "feed_batch",
 }
 _WALLET_WINDOW_SECONDS = 3600
 _WALLET_MAX_CALLS_PER_WINDOW = 30
@@ -255,6 +257,28 @@ def build_http_payment_middleware(app, env: dict[str, str] | None = None):
                 },
             },
         },
+        "GET /x402/dk/company/verify": {
+            "tool": "danish_company_verify_v1",
+            "tags": ["denmark", "company-data", "registry"],
+            "example": {"cvr_or_name": "LEGO"},
+            "schema": {
+                "properties": {"cvr_or_name": {"type": "string", "description": "Danish CVR number (8 digits) or company name"}},
+                "required": ["cvr_or_name"],
+            },
+        },
+        "GET /x402/dk/company/changes": {
+            "tool": "danish_company_changes_v1",
+            "tags": ["denmark", "company-data", "registry"],
+            "example": {"days": 7, "limit": 25},
+            "schema": {
+                "properties": {
+                    "days": {"type": "integer", "minimum": 1, "maximum": 30},
+                    "event_types": {"type": "array", "items": {"type": "string"}},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                    "cvr_number": {"type": "string"},
+                },
+            },
+        },
     }
     routes = {}
     for route, metadata in route_tools.items():
@@ -274,7 +298,7 @@ def build_http_payment_middleware(app, env: dict[str, str] | None = None):
             "description": f"Norric paid tool: {tool_name}",
             "mimeType": "application/json",
             "serviceName": "Norric",
-            "tags": ["sweden", "company-data", "registry"],
+            "tags": metadata.get("tags", ["sweden", "company-data", "registry"]),
             "extensions": declare_discovery_extension(
                 input=metadata["example"],
                 input_schema=metadata["schema"],

@@ -4,6 +4,19 @@ All notable changes to norric-mcp.
 
 ## Unreleased
 
+### Added
+
+- **Denmark country two:** CVR (Datafordeler) pipeline and two paid tools.
+  `danish_company_verify_v1` (lookup band, $0.002) and
+  `danish_company_changes_v1` (feed_batch band, $0.02), backed by weekly
+  total-download baselines, a 15-minute `CVR_Events` consumer with
+  package-completeness checkpoints, and a nightly reconciliation monitor.
+  New tables: `norric_dk_entities`, `norric_dk_field_changes`,
+  `norric_dk_events`, `norric_dk_ingest_state` (migrations/DK_001). New
+  paid HTTP routes: `/x402/dk/company/verify`, `/x402/dk/company/changes`.
+  Sources CC BY 4.0; Danish labels canonical; no CVRPerson/UBO ingestion;
+  EU-only residency verified for all endpoints used (docs/denmark-cvr.md).
+
 ### Breaking
 
 - **`score_source: "mock"` removed.** Orgnrs without signal data now return
