@@ -125,6 +125,19 @@ claude mcp add norric http://localhost:8080/mcp \
 | `kreditvakt_bankruptcy_status_v1` | Bolagsverket konkurs status |
 | `kreditvakt_contagion_v1` | Ownership-network contagion signals |
 
+### Registry verification & changes — Sweden + Denmark (paid, x402)
+| Tool | Description |
+|------|-------------|
+| `swedish_company_verify_v1` | Verify a Swedish company: identity, legal status, insolvency flags, cited evidence |
+| `swedish_company_changes_v1` | Source-backed Swedish registry changes, 1–30 day window |
+| `danish_company_verify_v1` | Verify a Danish company against CVR: identity (virksomhedsform, address, industry), legal status, cited evidence |
+| `danish_company_changes_v1` | Source-backed Danish CVR registry changes, 1–30 day window |
+
+Paid per call over x402 (Base Sepolia testnet USDC): verify tools $0.002,
+changes tools $0.02. Anonymous wallet-only access, no account or API key.
+HTTP mirrors: `/x402/company/*` (Sweden), `/x402/dk/company/*` (Denmark).
+Danish pipeline: docs/denmark-cvr.md.
+
 ### Norric Vigil — Company lifecycle detection (registered, inactive)
 | Tool | Description |
 |------|-------------|
