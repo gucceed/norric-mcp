@@ -205,3 +205,48 @@ def build_tool_payment_wrapper(tool_name: str, env: dict[str, str] | None = None
 # Backwards-compatible import for old callers; freshness is intentionally free.
 def build_data_freshness_wrapper(env=None):
     return lambda handler: handler
+
+
+def build_http_payment_middleware(app, env: dict[str, str] | None = None):
+    """Protect the public x402 REST resources; leave the app unchanged off testnet."""
+    values = env if env is not None else os.environ
+    if not _enabled(values):
+        return app
+
+    config = validate_testnet_config(values)
+    validate_price_bands()
+
+    from x402 import AssetAmount, x402ResourceServer
+    from x402.http import HTTPFacilitatorClient
+    from x402.http.middleware.fastapi import PaymentMiddlewareASGI
+    from x402.mechanisms.evm.exact import ExactEvmServerScheme
+
+    facilitator = HTTPFacilitatorClient({"url": config["facilitator_url"]})
+    resource_server = x402ResourceServer(facilitator)
+    resource_server.register(BASE_SEPOLIA, ExactEvmServerScheme())
+
+    route_tools = {
+        "GET /x402/company/score": "kreditvakt_score_company_v1",
+        "GET /x402/company/verify": "swedish_company_verify_v1",
+        "GET /x402/company/changes": "swedish_company_changes_v1",
+    }
+    routes = {}
+    for route, tool_name in route_tools.items():
+        band = TOOL_PRICE_BANDS[tool_name]
+        routes[route] = {
+            "accepts": {
+                "scheme": "exact",
+                "network": BASE_SEPOLIA,
+                "payTo": config["pay_to"],
+                "price": AssetAmount(
+                    amount=str(PRICE_BANDS_ATOMIC[band]), asset=BASE_SEPOLIA_USDC
+                ),
+                "maxTimeoutSeconds": 120,
+            },
+            "resource": f"https://mcp.norric.io{route.split(' ', 1)[1]}",
+            "description": f"Norric paid tool: {tool_name}",
+            "mimeType": "application/json",
+            "serviceName": "Norric",
+            "tags": ["sweden", "company-data", "registry"],
+        }
+    return PaymentMiddlewareASGI(app, routes=routes, server=resource_server)

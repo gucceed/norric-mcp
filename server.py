@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastmcp import FastMCP
-from x402_payments import build_tool_payment_wrapper
+from x402_payments import build_tool_payment_wrapper, build_http_payment_middleware
 
 # ── Core envelope types (inline for single-file deployability) ─────────────────
 
@@ -1851,7 +1851,8 @@ _NORRIC_API_KEYS_ENV = os.environ.get("NORRIC_API_KEYS", "")
 _VALID_KEYS = set(k.strip() for k in _NORRIC_API_KEYS_ENV.split(",") if k.strip())
 
 
-_OPEN_PATHS = {"/health", "/signup/free", "/checkout", "/webhooks/stripe"}
+_OPEN_PATHS = {"/health", "/openapi.json", "/.well-known/x402", "/signup/free", "/checkout", "/webhooks/stripe"}
+_OPEN_PREFIXES = ("/x402/",)
 
 # Scoring paths: auth is OPTIONAL.
 # No key → free-tier anonymous (rate-limited by IP in kreditvakt/api.py).
@@ -1920,7 +1921,7 @@ class _NorricAuthMiddleware:
         path = scope.get("path", "")
 
         # Fully public — no auth needed
-        if path in _OPEN_PATHS:
+        if path in _OPEN_PATHS or path.startswith(_OPEN_PREFIXES):
             await self.app(scope, receive, send)
             return
 
@@ -2019,7 +2020,7 @@ class _NorricAuthMiddleware:
 async def _health_handler(scope, receive, send):
     from starlette.responses import JSONResponse
 
-    health = {"status": "ok", "mcp_tools": 26, "version": "2.0.0"}
+    health = {"status": "ok", "mcp_tools": len(await mcp.list_tools()), "version": "2.0.0"}
 
     # Query DB for product health stats
     try:
@@ -2128,12 +2129,30 @@ from watch.api import app as _watch_app  # noqa: E402
 _ISSUANCE_PATHS = {"/signup/free", "/checkout", "/webhooks/stripe"}
 
 
+_HTTP_PAID_HANDLERS = {
+    "kreditvakt_score_company_v1": kreditvakt_score_company,
+    "swedish_company_verify_v1": swedish_company_verify,
+    "swedish_company_changes_v1": swedish_company_changes,
+}
+
+
 async def _router(scope, receive, send):
-    """Route /health, issuance paths, /api/v1/watches (watch), /api/* (kreditvakt), and everything else to FastMCP."""
+    """Route public discovery, paid HTTP resources, product APIs and MCP."""
     if scope["type"] == "http":
         path = scope.get("path", "")
         if path == "/health":
             await _health_handler(scope, receive, send)
+        elif path == "/openapi.json":
+            from discovery import openapi_document
+            from starlette.responses import JSONResponse
+            await JSONResponse(openapi_document())(scope, receive, send)
+        elif path == "/.well-known/x402":
+            from discovery import well_known_document
+            from starlette.responses import JSONResponse
+            await JSONResponse(well_known_document())(scope, receive, send)
+        elif path in __import__("discovery").HTTP_PAID_ROUTES:
+            from discovery import execute_route
+            await execute_route(path, scope, _HTTP_PAID_HANDLERS, receive, send)
         elif path in _ISSUANCE_PATHS:
             await _issuance_app(scope, receive, send)
         elif path.startswith("/api/v1/watches"):
@@ -2149,7 +2168,7 @@ async def _router(scope, receive, send):
 from starlette.middleware.cors import CORSMiddleware  # noqa: E402
 
 app = CORSMiddleware(
-    _NorricAuthMiddleware(_router),
+    build_http_payment_middleware(_NorricAuthMiddleware(_router)),
     allow_origins=[
         "https://kreditvakt.com",
         "https://www.kreditvakt.com",
@@ -2166,8 +2185,10 @@ app = CORSMiddleware(
         "Mcp-Session-Id",
         "Mcp-Protocol-Version",
         "Accept",
+        "PAYMENT-SIGNATURE",
+        "X-PAYMENT",
     ],
-    expose_headers=["Mcp-Session-Id"],
+    expose_headers=["Mcp-Session-Id", "PAYMENT-REQUIRED", "PAYMENT-RESPONSE"],
     allow_credentials=False,
 )
 
