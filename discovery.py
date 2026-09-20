@@ -53,9 +53,9 @@ HTTP_PAID_ROUTES = {
         "description": "Returns source-backed registrations, closures, renames, address changes and mergers.",
         "parameters": [
             {"name": "days", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 30, "default": 7}},
-            {"name": "days", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 30, "default": 7}},
+            {"name": "event_types", "in": "query", "schema": {"type": "array", "items": {"type": "string"}}},
             {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25}},
-            {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25}},
+            {"name": "orgnr", "in": "query", "schema": {"type": "string"}},
         ],
     },
 }
