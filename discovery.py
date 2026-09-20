@@ -51,11 +51,39 @@ HTTP_PAID_ROUTES = {
         "tool": "swedish_company_changes_v1",
         "summary": "Read recent Swedish company registry changes",
         "description": "Returns source-backed registrations, closures, renames, address changes and mergers.",
+        "tag": "Paid Swedish company intelligence",
         "parameters": [
             {"name": "days", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 30, "default": 7}},
             {"name": "event_types", "in": "query", "schema": {"type": "array", "items": {"type": "string"}}},
             {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25}},
             {"name": "orgnr", "in": "query", "schema": {"type": "string"}},
+        ],
+    },
+    "/x402/dk/company/verify": {
+        "tool": "danish_company_verify_v1",
+        "summary": "Verify a Danish company against CVR registry data",
+        "description": "Returns normalized Danish company identity, legal status, evidence and source timestamps.",
+        "tag": "Paid Danish company intelligence",
+        "parameters": [
+            {
+                "name": "cvr_or_name",
+                "in": "query",
+                "required": True,
+                "schema": {"type": "string", "minLength": 2},
+                "description": "Danish CVR number (8 digits) or company name.",
+            }
+        ],
+    },
+    "/x402/dk/company/changes": {
+        "tool": "danish_company_changes_v1",
+        "summary": "Read recent Danish company registry changes",
+        "description": "Returns source-backed Danish registrations, closures, renames, address changes and mergers from CVR.",
+        "tag": "Paid Danish company intelligence",
+        "parameters": [
+            {"name": "days", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 30, "default": 7}},
+            {"name": "event_types", "in": "query", "schema": {"type": "array", "items": {"type": "string"}}},
+            {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25}},
+            {"name": "cvr_number", "in": "query", "schema": {"type": "string"}},
         ],
     },
 }
@@ -83,7 +111,7 @@ def openapi_document() -> dict[str, Any]:
                 "operationId": tool_name,
                 "summary": route["summary"],
                 "description": route["description"],
-                "tags": ["Paid Swedish company intelligence"],
+                "tags": [route.get("tag", "Paid Swedish company intelligence")],
                 "parameters": route["parameters"],
                 "x-payment-info": {
                     "price": {"mode": "fixed", "currency": "USD", "amount": _price_usd(tool_name)},
@@ -146,7 +174,7 @@ def well_known_document() -> dict[str, Any]:
         "x402Version": 2,
         "service": {
             "name": "Norric",
-            "description": "Swedish company registry verification and change intelligence for agents.",
+            "description": "Swedish and Danish company registry verification and change intelligence for agents.",
             "url": ORIGIN,
             "homepage": "https://norric.io",
             "openapi": f"{ORIGIN}/openapi.json",
@@ -179,6 +207,17 @@ async def execute_route(path: str, scope: dict[str, Any], handlers: dict[str, Ca
             kwargs = {"orgnr": values["orgnr"][0]}
         elif path == "/x402/company/verify":
             kwargs = {"orgnr_or_name": values["orgnr_or_name"][0]}
+        elif path == "/x402/dk/company/verify":
+            kwargs = {"cvr_or_name": values["cvr_or_name"][0]}
+        elif path == "/x402/dk/company/changes":
+            kwargs = {
+                "days": int(values.get("days", ["7"])[0]),
+                "event_types": values.get("event_types") or None,
+                "limit": int(values.get("limit", ["25"])[0]),
+                "cvr_number": (values.get("cvr_number") or [None])[0],
+            }
+            if not 1 <= kwargs["days"] <= 30 or not 1 <= kwargs["limit"] <= 100:
+                raise ValueError("days must be 1-30 and limit must be 1-100")
         else:
             kwargs = {
                 "days": int(values.get("days", ["7"])[0]),
