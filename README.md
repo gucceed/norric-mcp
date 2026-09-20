@@ -132,11 +132,13 @@ claude mcp add norric http://localhost:8080/mcp \
 | `swedish_company_changes_v1` | Source-backed Swedish registry changes, 1–30 day window |
 | `danish_company_verify_v1` | Verify a Danish company against CVR: identity (virksomhedsform, address, industry), legal status, cited evidence |
 | `danish_company_changes_v1` | Source-backed Danish CVR registry changes, 1–30 day window |
+| `norwegian_company_verify_v1` | Verify a Norwegian organisation against Brønnøysund Enhetsregisteret |
+| `norwegian_company_changes_v1` | Source-backed Norwegian registry changes, 1–30 day window |
 
 Paid per call over x402 (Base Sepolia testnet USDC): verify tools $0.002,
 changes tools $0.02. Anonymous wallet-only access, no account or API key.
-HTTP mirrors: `/x402/company/*` (Sweden), `/x402/dk/company/*` (Denmark).
-Danish pipeline: docs/denmark-cvr.md.
+HTTP mirrors: `/x402/company/*` (Sweden), `/x402/dk/company/*` (Denmark), `/x402/no/company/*` (Norway).
+Danish pipeline: docs/denmark-cvr.md. Norwegian pipeline: docs/norway-brreg.md.
 
 ### Norric Vigil — Company lifecycle detection (registered, inactive)
 | Tool | Description |
