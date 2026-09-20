@@ -1,0 +1,1 @@
+"""Norwegian Brønnøysund Enhetsregisteret ingestion."""
