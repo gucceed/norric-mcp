@@ -27,28 +27,14 @@ def download_companies(dest:Path)->Path:
  raise PrhError(f'PRH download failed: {type(last).__name__}: {last}')
 
 def iter_download(path:Path)->Iterator[dict]:
- # The compressed archive is ~100 MB but expands past 1.4 GB. Stream the JSON
- # array so a worker never holds the complete Finnish registry in memory.
  with zipfile.ZipFile(path) as z:
   names=[n for n in z.namelist() if n.lower().endswith('.json')]
   if not names:raise PrhError('PRH archive contains no JSON file')
   with z.open(names[0]) as raw:
-   import io
-   f=io.TextIOWrapper(raw,encoding='utf-8');first=f.read(1)
-   if first!='[':raise PrhError('Expected a JSON array in PRH bulk archive')
-   dec=json.JSONDecoder();buf='';eof=False
-   while True:
-    while not eof and len(buf)<131072:
-     chunk=f.read(131072)
-     if chunk:buf+=chunk
-     else:eof=True;break
-    buf=buf.lstrip(' \r\n\t,')
-    if buf.startswith(']'):break
-    try:obj,end=dec.raw_decode(buf)
-    except json.JSONDecodeError:
-     if eof:raise
-     continue
-    yield obj;buf=buf[end:]
+   data=json.load(raw)
+  rows=data.get('companies',data) if isinstance(data,dict) else data
+  if not isinstance(rows,list):raise PrhError('Unexpected PRH bulk shape')
+  yield from rows
 
 def search_companies(**params)->dict:
  r=httpx.get(f'{BASE_URL}/companies',params=params,timeout=TIMEOUT,follow_redirects=True,headers={'User-Agent':'Norric/1.0 (edgar@norric.io)'})

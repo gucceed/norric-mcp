@@ -11,5 +11,5 @@ def test_map_company_preserves_official_codes():
 
 def test_iter_zip(tmp_path):
  p=tmp_path/'all.zip'
- with zipfile.ZipFile(p,'w') as z:z.writestr('companies.json',json.dumps([{'businessId':{'value':'0112038-9'}}]))
+ with zipfile.ZipFile(p,'w') as z:z.writestr('companies.json',json.dumps({'companies':[{'businessId':{'value':'0112038-9'}}]}))
  assert list(iter_download(p))[0]['businessId']['value']=='0112038-9'
