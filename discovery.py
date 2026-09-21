@@ -96,6 +96,16 @@ HTTP_PAID_ROUTES = {
         "description": "Returns source-backed Norwegian registrations, closures, renames, address changes, bankruptcy and liquidation changes.", "tag": "Paid Norwegian company intelligence",
         "parameters": [{"name":"days","in":"query","schema":{"type":"integer","minimum":1,"maximum":30,"default":7}}, {"name":"event_types","in":"query","schema":{"type":"array","items":{"type":"string"}}}, {"name":"limit","in":"query","schema":{"type":"integer","minimum":1,"maximum":100,"default":25}}, {"name":"org_number","in":"query","schema":{"type":"string"}}],
     },
+    "/x402/fi/company/verify": {
+        "tool":"finnish_company_verify_v1","summary":"Verify a Finnish company against PRH/YTJ",
+        "description":"Returns official Finnish company identity, registry status, address, industry and freshness.","tag":"Paid Finnish company intelligence",
+        "parameters":[{"name":"business_id_or_name","in":"query","required":True,"schema":{"type":"string","minLength":2},"description":"Finnish Business ID or company name."}],
+    },
+    "/x402/fi/company/changes": {
+        "tool":"finnish_company_changes_v1","summary":"Read recent Finnish company registry changes",
+        "description":"Returns source-backed changes detected between daily PRH/YTJ snapshots.","tag":"Paid Finnish company intelligence",
+        "parameters":[{"name":"days","in":"query","schema":{"type":"integer","minimum":1,"maximum":30,"default":7}},{"name":"event_types","in":"query","schema":{"type":"array","items":{"type":"string"}}},{"name":"limit","in":"query","schema":{"type":"integer","minimum":1,"maximum":100,"default":25}},{"name":"business_id","in":"query","schema":{"type":"string"}}],
+    },
 
 }
 
@@ -185,7 +195,7 @@ def well_known_document() -> dict[str, Any]:
         "x402Version": 2,
         "service": {
             "name": "Norric",
-            "description": "Swedish and Danish company registry verification and change intelligence for agents.",
+            "description": "Nordic company registry verification and change intelligence for agents.",
             "url": ORIGIN,
             "homepage": "https://norric.io",
             "openapi": f"{ORIGIN}/openapi.json",
@@ -222,6 +232,11 @@ async def execute_route(path: str, scope: dict[str, Any], handlers: dict[str, Ca
             kwargs = {"cvr_or_name": values["cvr_or_name"][0]}
         elif path == "/x402/no/company/verify":
             kwargs = {"orgnr_or_name": values["orgnr_or_name"][0]}
+        elif path == "/x402/fi/company/verify":
+            kwargs = {"business_id_or_name": values["business_id_or_name"][0]}
+        elif path == "/x402/fi/company/changes":
+            kwargs = {"days": int(values.get("days", ["7"])[0]), "event_types": values.get("event_types") or None, "limit": int(values.get("limit", ["25"])[0]), "business_id": (values.get("business_id") or [None])[0]}
+            if not 1 <= kwargs["days"] <= 30 or not 1 <= kwargs["limit"] <= 100: raise ValueError("days must be 1-30 and limit must be 1-100")
         elif path == "/x402/no/company/changes":
             kwargs = {"days": int(values.get("days", ["7"])[0]), "event_types": values.get("event_types") or None, "limit": int(values.get("limit", ["25"])[0]), "org_number": (values.get("org_number") or [None])[0]}
             if not 1 <= kwargs["days"] <= 30 or not 1 <= kwargs["limit"] <= 100: raise ValueError("days must be 1-30 and limit must be 1-100")
