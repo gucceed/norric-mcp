@@ -4,6 +4,8 @@ All notable changes to norric-mcp.
 
 ## Unreleased
 
+- Added Finland country four: `finnish_company_verify_v1` and `finnish_company_changes_v1`, daily PRH/YTJ open-data snapshot pipeline, CC BY 4.0 attribution and paid `/x402/fi/company/*` routes. No Finnish data load is started by this change.
+
 - Added Norway country three: `norwegian_company_verify_v1` ($0.002) and
   `norwegian_company_changes_v1` ($0.02), official Brønnøysund daily bulk,
   update-feed deltas and nightly reconciliation. Added NLOD evidence, NO schema,

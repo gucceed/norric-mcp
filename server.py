@@ -798,6 +798,37 @@ async def norwegian_company_changes(days:int=7,event_types:Optional[list[str]]=N
     return wrap(tool="norwegian_company_changes_v1",source=result["sources"],confidence=result["confidence"],ttl=3600,data=result["data"],warnings=result["warnings"])
 
 
+@mcp.tool(
+    name="finnish_company_verify_v1",
+    description=("Verify a Finnish company against official PRH/YTJ daily open data. "
+                 "Returns identity, address, legal form, industry, registry status, recent "
+                 "source-backed changes and freshness. No person or beneficial-owner data. CC BY 4.0."),
+)
+@build_tool_payment_wrapper("finnish_company_verify_v1")
+async def finnish_company_verify(business_id_or_name:str)->dict:
+    from ingestion.db import Session
+    from verify.fi_company import verify_company
+    db=Session()
+    try: result=verify_company(db,business_id_or_name)
+    except Exception as exc:return wrap(tool="finnish_company_verify_v1",source=[],confidence=0.0,ttl=0,data={},warnings=[f"verify_error: {type(exc).__name__}"])
+    finally:db.close()
+    return wrap(tool="finnish_company_verify_v1",source=result["sources"],confidence=result["confidence"],ttl=3600,data=result["data"],warnings=result.get("warnings",[]))
+
+@mcp.tool(
+    name="finnish_company_changes_v1",
+    description=("Return source-backed Finnish company changes over 1-30 days from "
+                 "daily PRH/YTJ snapshot diffs. Never treats Norric first-seen time as registration. CC BY 4.0."),
+)
+@build_tool_payment_wrapper("finnish_company_changes_v1")
+async def finnish_company_changes(days:int=7,event_types:Optional[list[str]]=None,limit:int=25,business_id:Optional[str]=None)->dict:
+    from ingestion.db import Session
+    from changes.fi_company import company_changes
+    db=Session()
+    try:result=company_changes(db,days=days,event_types=event_types,limit=limit,business_id=business_id)
+    except Exception as exc:return wrap(tool="finnish_company_changes_v1",source=[],confidence=0.0,ttl=0,data={},warnings=[f"changes_error: {type(exc).__name__}: {exc}"])
+    finally:db.close()
+    return wrap(tool="finnish_company_changes_v1",source=result["sources"],confidence=result["confidence"],ttl=3600,data=result["data"],warnings=result["warnings"])
+
 # ── Supply-chain contagion ─────────────────────────────────────────────────────
 
 _CONTAGION_DISCLAIMER = (
@@ -2003,7 +2034,7 @@ _OPTIONAL_AUTH_PREFIX = "/api/score/"
 # Anonymous MCP is deliberately narrow: clients may establish a session and
 # discover tools, but may execute only the public status tool or the one x402
 # gated tool. Payment verification remains inside the tool wrapper.
-_ANONYMOUS_MCP_CALLS = {"norric_status_v1", "norric_data_freshness_v1", "kreditvakt_score_company_v1", "swedish_company_verify_v1", "swedish_company_changes_v1", "danish_company_verify_v1", "danish_company_changes_v1", "norwegian_company_verify_v1", "norwegian_company_changes_v1"}
+_ANONYMOUS_MCP_CALLS = {"norric_status_v1", "norric_data_freshness_v1", "kreditvakt_score_company_v1", "swedish_company_verify_v1", "swedish_company_changes_v1", "danish_company_verify_v1", "danish_company_changes_v1", "norwegian_company_verify_v1", "norwegian_company_changes_v1", "finnish_company_verify_v1", "finnish_company_changes_v1"}
 _ANONYMOUS_MCP_METHODS = {"initialize", "notifications/initialized", "tools/list", "ping"}
 
 
@@ -2277,6 +2308,8 @@ _HTTP_PAID_HANDLERS = {
     "danish_company_changes_v1": danish_company_changes,
     "norwegian_company_verify_v1": norwegian_company_verify,
     "norwegian_company_changes_v1": norwegian_company_changes,
+    "finnish_company_verify_v1": finnish_company_verify,
+    "finnish_company_changes_v1": finnish_company_changes,
 }
 
 

@@ -31,6 +31,8 @@ TOOL_PRICE_BANDS = {
     "danish_company_changes_v1": "feed_batch",
     "norwegian_company_verify_v1": "lookup",
     "norwegian_company_changes_v1": "feed_batch",
+    "finnish_company_verify_v1": "lookup",
+    "finnish_company_changes_v1": "feed_batch",
 }
 _WALLET_WINDOW_SECONDS = 3600
 _WALLET_MAX_CALLS_PER_WINDOW = 30
@@ -292,6 +294,16 @@ def build_http_payment_middleware(app, env: dict[str, str] | None = None):
             "tags": ["norway", "company-data", "registry"],
             "example": {"days": 7, "limit": 25},
             "schema": {"properties": {"days": {"type": "integer", "minimum": 1, "maximum": 30}, "event_types": {"type": "array", "items": {"type": "string"}}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}, "org_number": {"type": "string"}}},
+        },
+        "GET /x402/fi/company/verify": {
+            "tool": "finnish_company_verify_v1", "tags": ["finland", "company-data", "registry"],
+            "example": {"business_id_or_name": "Nokia"},
+            "schema": {"properties": {"business_id_or_name": {"type": "string", "description": "Finnish Business ID or company name"}}, "required": ["business_id_or_name"]},
+        },
+        "GET /x402/fi/company/changes": {
+            "tool": "finnish_company_changes_v1", "tags": ["finland", "company-data", "registry"],
+            "example": {"days": 7, "limit": 25},
+            "schema": {"properties": {"days": {"type": "integer", "minimum": 1, "maximum": 30}, "event_types": {"type": "array", "items": {"type": "string"}}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}, "business_id": {"type": "string"}}},
         },
     }
     routes = {}
