@@ -168,6 +168,8 @@ _FULL_BEAT_SCHEDULE = {
     "brreg-bulk-daily": {"task": "brreg.bulk_ingest", "schedule": crontab(hour=7, minute=15), "options": {"timezone": "Europe/Stockholm", "expires": 10800}},
     "brreg-updates-poll-15m": {"task": "brreg.updates_poll", "schedule": crontab(minute="7,22,37,52"), "options": {"expires": 600}},
     "brreg-reconcile-nightly": {"task": "brreg.reconcile_nightly", "schedule": crontab(hour=6, minute=30), "options": {"timezone": "Europe/Stockholm", "expires": 3600}},
+    # FI: PRH/YTJ country four. Daily full snapshot; no source delta API.
+    "prh-bulk-daily": {"task": "prh.bulk_ingest", "schedule": crontab(hour=7, minute=45), "options": {"timezone": "Europe/Stockholm", "expires": 10800}},
 
 }
 
