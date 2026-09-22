@@ -3,7 +3,8 @@ import json,tempfile
 from datetime import date
 from pathlib import Path
 from sqlalchemy import text
-from ingestion.db import Session,pipeline_run
+from ingestion.db import Session
+from ingestion.pipeline_run import pipeline_run
 from .client import download_companies,iter_download
 from .normalize import map_company
 FIELDS=('name','legal_form_code','is_active','registered_at','dissolved_at','industry_code','street','city','postcode','website')
