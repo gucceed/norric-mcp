@@ -33,6 +33,8 @@ TOOL_PRICE_BANDS = {
     "norwegian_company_changes_v1": "feed_batch",
     "finnish_company_verify_v1": "lookup",
     "finnish_company_changes_v1": "feed_batch",
+    "estonian_company_verify_v1": "lookup",
+    "estonian_company_changes_v1": "feed_batch",
     "french_company_verify_v1": "lookup",
     "french_company_changes_v1": "feed_batch",
 }
@@ -306,6 +308,16 @@ def build_http_payment_middleware(app, env: dict[str, str] | None = None):
             "tool": "finnish_company_changes_v1", "tags": ["finland", "company-data", "registry"],
             "example": {"days": 7, "limit": 25},
             "schema": {"properties": {"days": {"type": "integer", "minimum": 1, "maximum": 30}, "event_types": {"type": "array", "items": {"type": "string"}}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}, "business_id": {"type": "string"}}},
+        },
+        "GET /x402/ee/company/verify": {
+            "tool": "estonian_company_verify_v1", "tags": ["estonia", "company-data", "registry"],
+            "example": {"registry_code_or_name": "12409465"},
+            "schema": {"properties": {"registry_code_or_name": {"type": "string", "description": "Estonian registry code (8 digits) or company name"}}, "required": ["registry_code_or_name"]},
+        },
+        "GET /x402/ee/company/changes": {
+            "tool": "estonian_company_changes_v1", "tags": ["estonia", "company-data", "registry"],
+            "example": {"days": 7, "limit": 25},
+            "schema": {"properties": {"days": {"type": "integer", "minimum": 1, "maximum": 30}, "event_types": {"type": "array", "items": {"type": "string"}}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}, "registry_code": {"type": "string"}}},
         },
         "GET /x402/fr/company/verify": {
             "tool": "french_company_verify_v1", "tags": ["france", "company-data", "registry"],

@@ -148,6 +148,8 @@ def test_approved_price_bands_are_exact_and_valid():
         "norwegian_company_changes_v1": "feed_batch",
         "finnish_company_verify_v1": "lookup",
         "finnish_company_changes_v1": "feed_batch",
+        "estonian_company_verify_v1": "lookup",
+        "estonian_company_changes_v1": "feed_batch",
         "french_company_verify_v1": "lookup",
         "french_company_changes_v1": "feed_batch",
     }
