@@ -35,6 +35,8 @@ TOOL_PRICE_BANDS = {
     "finnish_company_changes_v1": "feed_batch",
     "estonian_company_verify_v1": "lookup",
     "estonian_company_changes_v1": "feed_batch",
+    "french_company_verify_v1": "lookup",
+    "french_company_changes_v1": "feed_batch",
 }
 _WALLET_WINDOW_SECONDS = 3600
 _WALLET_MAX_CALLS_PER_WINDOW = 30
@@ -316,6 +318,16 @@ def build_http_payment_middleware(app, env: dict[str, str] | None = None):
             "tool": "estonian_company_changes_v1", "tags": ["estonia", "company-data", "registry"],
             "example": {"days": 7, "limit": 25},
             "schema": {"properties": {"days": {"type": "integer", "minimum": 1, "maximum": 30}, "event_types": {"type": "array", "items": {"type": "string"}}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}, "registry_code": {"type": "string"}}},
+        },
+        "GET /x402/fr/company/verify": {
+            "tool": "french_company_verify_v1", "tags": ["france", "company-data", "registry"],
+            "example": {"siren_or_name": "552100554"},
+            "schema": {"properties": {"siren_or_name": {"type": "string", "description": "French SIREN (9 digits) or company name"}}, "required": ["siren_or_name"]},
+        },
+        "GET /x402/fr/company/changes": {
+            "tool": "french_company_changes_v1", "tags": ["france", "company-data", "registry"],
+            "example": {"days": 7, "limit": 25},
+            "schema": {"properties": {"days": {"type": "integer", "minimum": 1, "maximum": 30}, "event_types": {"type": "array", "items": {"type": "string"}}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}, "siren": {"type": "string"}}},
         },
     }
     routes = {}

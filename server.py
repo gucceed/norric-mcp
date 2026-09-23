@@ -860,6 +860,38 @@ async def estonian_company_changes(days:int=7,event_types:Optional[list[str]]=No
     finally:db.close()
     return wrap(tool="estonian_company_changes_v1",source=result["sources"],confidence=result["confidence"],ttl=3600,data=result["data"],warnings=result["warnings"])
 
+@mcp.tool(
+    name="french_company_verify_v1",
+    description=("Verify a French company against the official INSEE Base Sirene mirror. "
+                 "Returns identity, address, legal form, industry, registry status, recent "
+                 "source-backed changes and freshness. Non-diffusible natural persons "
+                 "(Art. A123-96 code de commerce) are excluded. Licence Ouverte 2.0."),
+)
+@build_tool_payment_wrapper("french_company_verify_v1")
+async def french_company_verify(siren_or_name:str)->dict:
+    from ingestion.db import Session
+    from verify.fr_company import verify_company
+    db=Session()
+    try: result=verify_company(db,siren_or_name)
+    except Exception as exc:return wrap(tool="french_company_verify_v1",source=[],confidence=0.0,ttl=0,data={},warnings=[f"verify_error: {type(exc).__name__}"])
+    finally:db.close()
+    return wrap(tool="french_company_verify_v1",source=result["sources"],confidence=result["confidence"],ttl=3600,data=result["data"],warnings=result.get("warnings",[]))
+
+@mcp.tool(
+    name="french_company_changes_v1",
+    description=("Return source-backed French company changes over 1-30 days from "
+                 "INSEE Base Sirene snapshot diffs. Never treats Norric first-seen time as registration. Licence Ouverte 2.0."),
+)
+@build_tool_payment_wrapper("french_company_changes_v1")
+async def french_company_changes(days:int=7,event_types:Optional[list[str]]=None,limit:int=25,siren:Optional[str]=None)->dict:
+    from ingestion.db import Session
+    from changes.fr_company import company_changes
+    db=Session()
+    try:result=company_changes(db,days=days,event_types=event_types,limit=limit,siren=siren)
+    except Exception as exc:return wrap(tool="french_company_changes_v1",source=[],confidence=0.0,ttl=0,data={},warnings=[f"changes_error: {type(exc).__name__}: {exc}"])
+    finally:db.close()
+    return wrap(tool="french_company_changes_v1",source=result["sources"],confidence=result["confidence"],ttl=3600,data=result["data"],warnings=result["warnings"])
+
 # ── Supply-chain contagion ─────────────────────────────────────────────────────
 
 _CONTAGION_DISCLAIMER = (
@@ -2065,7 +2097,7 @@ _OPTIONAL_AUTH_PREFIX = "/api/score/"
 # Anonymous MCP is deliberately narrow: clients may establish a session and
 # discover tools, but may execute only the public status tool or the one x402
 # gated tool. Payment verification remains inside the tool wrapper.
-_ANONYMOUS_MCP_CALLS = {"norric_status_v1", "norric_data_freshness_v1", "kreditvakt_score_company_v1", "swedish_company_verify_v1", "swedish_company_changes_v1", "danish_company_verify_v1", "danish_company_changes_v1", "norwegian_company_verify_v1", "norwegian_company_changes_v1", "finnish_company_verify_v1", "finnish_company_changes_v1", "estonian_company_verify_v1", "estonian_company_changes_v1"}
+_ANONYMOUS_MCP_CALLS = {"norric_status_v1", "norric_data_freshness_v1", "kreditvakt_score_company_v1", "swedish_company_verify_v1", "swedish_company_changes_v1", "danish_company_verify_v1", "danish_company_changes_v1", "norwegian_company_verify_v1", "norwegian_company_changes_v1", "finnish_company_verify_v1", "finnish_company_changes_v1", "estonian_company_verify_v1", "estonian_company_changes_v1", "french_company_verify_v1", "french_company_changes_v1"}
 _ANONYMOUS_MCP_METHODS = {"initialize", "notifications/initialized", "tools/list", "ping"}
 
 
@@ -2343,6 +2375,8 @@ _HTTP_PAID_HANDLERS = {
     "finnish_company_changes_v1": finnish_company_changes,
     "estonian_company_verify_v1": estonian_company_verify,
     "estonian_company_changes_v1": estonian_company_changes,
+    "french_company_verify_v1": french_company_verify,
+    "french_company_changes_v1": french_company_changes,
 }
 
 
