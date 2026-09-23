@@ -106,6 +106,16 @@ HTTP_PAID_ROUTES = {
         "description":"Returns source-backed changes detected between daily PRH/YTJ snapshots.","tag":"Paid Finnish company intelligence",
         "parameters":[{"name":"days","in":"query","schema":{"type":"integer","minimum":1,"maximum":30,"default":7}},{"name":"event_types","in":"query","schema":{"type":"array","items":{"type":"string"}}},{"name":"limit","in":"query","schema":{"type":"integer","minimum":1,"maximum":100,"default":25}},{"name":"business_id","in":"query","schema":{"type":"string"}}],
     },
+    "/x402/ee/company/verify": {
+        "tool":"estonian_company_verify_v1","summary":"Verify an Estonian company against e-Ariregister",
+        "description":"Returns official Estonian company identity, registry status, address, industry and freshness.","tag":"Paid Estonian company intelligence",
+        "parameters":[{"name":"registry_code_or_name","in":"query","required":True,"schema":{"type":"string","minLength":2},"description":"Estonian registry code (8 digits) or company name."}],
+    },
+    "/x402/ee/company/changes": {
+        "tool":"estonian_company_changes_v1","summary":"Read recent Estonian company registry changes",
+        "description":"Returns source-backed changes detected between daily e-Ariregister snapshots.","tag":"Paid Estonian company intelligence",
+        "parameters":[{"name":"days","in":"query","schema":{"type":"integer","minimum":1,"maximum":30,"default":7}},{"name":"event_types","in":"query","schema":{"type":"array","items":{"type":"string"}}},{"name":"limit","in":"query","schema":{"type":"integer","minimum":1,"maximum":100,"default":25}},{"name":"registry_code","in":"query","schema":{"type":"string"}}],
+    },
 
 }
 
