@@ -20,6 +20,7 @@ app.autodiscover_tasks([
     "ingestion.tasks.brreg_tasks",
     "ingestion.tasks.prh_tasks",
     "ingestion.tasks.ariregister_tasks",
+    "ingestion.tasks.sirene_tasks",
     "kreditvakt.signal_cross",
     "kreditvakt.contagion",
 ], related_name=None, force=True)

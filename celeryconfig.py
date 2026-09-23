@@ -173,6 +173,9 @@ _FULL_BEAT_SCHEDULE = {
     # EE: e-Ariregister country five prep. Daily full snapshot; the keyless open-data
     # files are the baseline (real-time SOAP/XML API needs a signed RIK contract).
     "ariregister-bulk-daily": {"task": "ariregister.bulk_ingest", "schedule": crontab(hour=8, minute=15), "options": {"timezone": "Europe/Stockholm", "expires": 10800}},
+    # FR: Sirene country six prep. Monthly stock files on data.gouv are the baseline
+    # (Licence Ouverte 2.0, keyless); non-diffusible persons are excluded at ingest.
+    "sirene-bulk-daily": {"task": "sirene.bulk_ingest", "schedule": crontab(hour=8, minute=45), "options": {"timezone": "Europe/Stockholm", "expires": 21600}},
 
 }
 
