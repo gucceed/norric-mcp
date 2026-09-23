@@ -170,6 +170,9 @@ _FULL_BEAT_SCHEDULE = {
     "brreg-reconcile-nightly": {"task": "brreg.reconcile_nightly", "schedule": crontab(hour=6, minute=30), "options": {"timezone": "Europe/Stockholm", "expires": 3600}},
     # FI: PRH/YTJ country four. Daily full snapshot; no source delta API.
     "prh-bulk-daily": {"task": "prh.bulk_ingest", "schedule": crontab(hour=7, minute=45), "options": {"timezone": "Europe/Stockholm", "expires": 10800}},
+    # EE: e-Ariregister country five prep. Daily full snapshot; the keyless open-data
+    # files are the baseline (real-time SOAP/XML API needs a signed RIK contract).
+    "ariregister-bulk-daily": {"task": "ariregister.bulk_ingest", "schedule": crontab(hour=8, minute=15), "options": {"timezone": "Europe/Stockholm", "expires": 10800}},
     # FR: Sirene country six prep. Monthly stock files on data.gouv are the baseline
     # (Licence Ouverte 2.0, keyless); non-diffusible persons are excluded at ingest.
     "sirene-bulk-daily": {"task": "sirene.bulk_ingest", "schedule": crontab(hour=8, minute=45), "options": {"timezone": "Europe/Stockholm", "expires": 21600}},
