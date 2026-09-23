@@ -106,6 +106,16 @@ HTTP_PAID_ROUTES = {
         "description":"Returns source-backed changes detected between daily PRH/YTJ snapshots.","tag":"Paid Finnish company intelligence",
         "parameters":[{"name":"days","in":"query","schema":{"type":"integer","minimum":1,"maximum":30,"default":7}},{"name":"event_types","in":"query","schema":{"type":"array","items":{"type":"string"}}},{"name":"limit","in":"query","schema":{"type":"integer","minimum":1,"maximum":100,"default":25}},{"name":"business_id","in":"query","schema":{"type":"string"}}],
     },
+    "/x402/fr/company/verify": {
+        "tool":"french_company_verify_v1","summary":"Verify a French company against INSEE Base Sirene",
+        "description":"Returns official French company identity, registry status, address, industry and freshness.","tag":"Paid French company intelligence",
+        "parameters":[{"name":"siren_or_name","in":"query","required":True,"schema":{"type":"string","minLength":2},"description":"French SIREN (9 digits) or company name."}],
+    },
+    "/x402/fr/company/changes": {
+        "tool":"french_company_changes_v1","summary":"Read recent French company registry changes",
+        "description":"Returns source-backed changes detected between INSEE Base Sirene snapshots.","tag":"Paid French company intelligence",
+        "parameters":[{"name":"days","in":"query","schema":{"type":"integer","minimum":1,"maximum":30,"default":7}},{"name":"event_types","in":"query","schema":{"type":"array","items":{"type":"string"}}},{"name":"limit","in":"query","schema":{"type":"integer","minimum":1,"maximum":100,"default":25}},{"name":"siren","in":"query","schema":{"type":"string"}}],
+    },
 
 }
 
