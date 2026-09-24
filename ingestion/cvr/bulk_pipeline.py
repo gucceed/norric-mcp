@@ -128,6 +128,31 @@ def _diff_and_write(db, existing: dict, record: dict, run_date: date,
     return changes
 
 
+def _baseline_sequence() -> tuple[int | None, str | None]:
+    """Checkpoint the events poll should resume from after this baseline.
+
+    Called BEFORE the total files are downloaded. Prefer the sequence the total
+    download itself reflects (no gap: later events replay idempotently). Fall
+    back to DAF_RegisterImportStatus.lastSequenceNumber read now; that may skip
+    events between file generation and now, which the next weekly baseline
+    repairs. Never raises: a failure leaves the checkpoint unseeded, and the
+    events poll then fails closed.
+    """
+    try:
+        seq = client.total_download_sequence("Virksomhed")
+        if seq:
+            return seq, "file_download_metadata"
+    except Exception as exc:  # noqa: BLE001
+        log.warning("cvr bulk: file-download sequence metadata unavailable: %s", exc)
+    try:
+        seq = int(client.fetch_register_import_status().get("lastSequenceNumber") or 0)
+        if seq > 0:
+            return seq, "register_import_status_pre_download"
+    except Exception as exc:  # noqa: BLE001
+        log.warning("cvr bulk: DAF_RegisterImportStatus unavailable: %s", exc)
+    return None, None
+
+
 def run_bulk_pipeline(dry_run: bool = False, pacer=None) -> dict:
     """pacer: optional ingestion.pacing.Pacer for paced one-shot baselines."""
     db = Session()
@@ -137,6 +162,10 @@ def run_bulk_pipeline(dry_run: bool = False, pacer=None) -> dict:
             run_date = date.today()
             if pacer is not None and not dry_run:
                 pacer.bind(db).start()
+
+            seed_seq, seed_source = _baseline_sequence()
+            ctx["checkpoint_seed"] = seed_seq
+            ctx["checkpoint_seed_source"] = seed_source
 
             with tempfile.TemporaryDirectory() as tmp:
                 tmp_path = Path(tmp)
@@ -187,9 +216,11 @@ def run_bulk_pipeline(dry_run: bool = False, pacer=None) -> dict:
                     db.execute(text("""
                         UPDATE norric_dk_ingest_state
                         SET last_bulk_filename = :f, last_bulk_at = now(),
+                            last_sequence_number = GREATEST(last_sequence_number,
+                                                            COALESCE(:seq, 0)),
                             updated_at = now()
                         WHERE id = 1
-                    """), {"f": v_zip.name})
+                    """), {"f": v_zip.name, "seq": seed_seq})
                     db.commit()
 
                 ctx["rows_skipped"] += 0
