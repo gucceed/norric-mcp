@@ -128,12 +128,15 @@ def _diff_and_write(db, existing: dict, record: dict, run_date: date,
     return changes
 
 
-def run_bulk_pipeline(dry_run: bool = False) -> dict:
+def run_bulk_pipeline(dry_run: bool = False, pacer=None) -> dict:
+    """pacer: optional ingestion.pacing.Pacer for paced one-shot baselines."""
     db = Session()
     try:
         with pipeline_run(db, "cvr_bulk") as ctx:
             run_id = ctx["run_id"]
             run_date = date.today()
+            if pacer is not None and not dry_run:
+                pacer.bind(db).start()
 
             with tempfile.TemporaryDirectory() as tmp:
                 tmp_path = Path(tmp)
@@ -175,8 +178,12 @@ def run_bulk_pipeline(dry_run: bool = False) -> dict:
                             ctx["rows_updated"] += 1
                         else:
                             ctx["rows_inserted"] += 1
+                        if pacer is not None:
+                            pacer.tick()
 
                 if not dry_run:
+                    if pacer is not None:
+                        pacer.finish()
                     db.execute(text("""
                         UPDATE norric_dk_ingest_state
                         SET last_bulk_filename = :f, last_bulk_at = now(),
