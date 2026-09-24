@@ -179,6 +179,35 @@ _FULL_BEAT_SCHEDULE = {
 
 }
 
+# ── Country beat gating (post-Stockholm load chain) ─────────────────────────
+# Edgar's order is DK -> NO -> FI -> EE -> FR, each first loaded once by its
+# paced, fail-closed runner (scripts/run_<cc>_post_stockholm_load.py). Until a
+# country's baseline is done its scheduled beats stay OFF, so a worker restart
+# or a DATABASE_URL change can never start an unpaced, out-of-order load.
+# Enable a country after its baseline by adding its code to
+# NORRIC_COUNTRY_BEATS on the worker, e.g. NORRIC_COUNTRY_BEATS=dk,no
+_GATED_COUNTRY_BEATS = {
+    "dk": ("cvr-bulk-weekly", "cvr-events-poll-15m", "cvr-reconcile-nightly"),
+    "no": ("brreg-bulk-daily", "brreg-updates-poll-15m", "brreg-reconcile-nightly"),
+    "fi": ("prh-bulk-daily",),
+    "ee": ("ariregister-bulk-daily",),
+    "fr": ("sirene-bulk-daily",),
+}
+
+
+def enabled_countries(raw):
+    return frozenset(c.strip().lower() for c in (raw or "").split(",") if c.strip())
+
+
+def gate_country_beats(schedule, enabled):
+    blocked = {name for cc, names in _GATED_COUNTRY_BEATS.items()
+               if cc not in enabled for name in names}
+    return {k: v for k, v in schedule.items() if k not in blocked}
+
+
+_FULL_BEAT_SCHEDULE = gate_country_beats(
+    _FULL_BEAT_SCHEDULE, enabled_countries(os.environ.get("NORRIC_COUNTRY_BEATS")))
+
 # ── Role-scoped beat / queue selection ────────────────────────────────────────
 # The full schedule above (T1 ingestion + vigil + signal) targets a future
 # general "norric" worker that is not yet deployed. Today the only deployed
