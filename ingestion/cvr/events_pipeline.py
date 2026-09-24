@@ -46,7 +46,14 @@ _EVENT_INSERT_SQL = """
     ON CONFLICT (event_id) DO NOTHING
 """
 
-_STATE_SQL = "SELECT last_sequence_number, last_event_id FROM norric_dk_ingest_state WHERE id = 1"
+_STATE_SQL = ("SELECT last_sequence_number, last_event_id, last_bulk_at "
+              "FROM norric_dk_ingest_state WHERE id = 1")
+
+# True when the incoming row version is older than the one already stored.
+_STALE_SQL = """
+    SELECT CAST(:incoming AS timestamptz) < registrering_fra
+    FROM norric_dk_entities WHERE cvr_number = :cvr
+"""
 
 _COMPANY_ENTITIES = {"CVR_Virksomhed", "Virksomhed"}
 
@@ -62,6 +69,13 @@ def run_events_pipeline(batch_size: int = 1000) -> dict:
             run_id = ctx["run_id"]
             state = db.execute(text(_STATE_SQL)).fetchone()
             since = int(state.last_sequence_number or 0) if state else 0
+            # Fail closed: never walk CVR's event history from zero. The
+            # checkpoint is seeded by the bulk baseline.
+            if since <= 0 or state is None or state.last_bulk_at is None:
+                log.warning("cvr events: checkpoint not seeded by a bulk baseline "
+                            "(seq=%s); skipping poll", since)
+                return {**ctx, "run_id": str(run_id), "events": 0,
+                        "skipped": "checkpoint_not_seeded"}
 
             status = client.fetch_register_import_status()
             complete_through = int(status.get("lastSequenceNumber") or 0)
@@ -110,6 +124,14 @@ def run_events_pipeline(batch_size: int = 1000) -> dict:
                     row = client.fetch_virksomhed_by_row_id(ev["object_datafordelerRowId"])
                     if row:
                         record = map_virksomhed_row(row)
+                        if record is not None and record.get("registrering_fra"):
+                            stale = db.execute(text(_STALE_SQL), {
+                                "incoming": record["registrering_fra"],
+                                "cvr": record["cvr_number"],
+                            }).scalar()
+                            if stale:
+                                ctx["rows_skipped"] += 1
+                                record = None
                         if record is not None:
                             record["source"] = "cvr_events"
                             reg = record.get("registrering_fra")
