@@ -39,3 +39,15 @@ python3 scripts/run_dk_post_stockholm_load.py \
 ```
 Once it prints its result with `load_status=done`, enable the country's beats
 (`NORRIC_COUNTRY_BEATS=dk`) and redeploy the worker.
+
+## Denmark events checkpoint
+The DK baseline seeds `norric_dk_ingest_state.last_sequence_number` itself. The value is written with
+`GREATEST(...)`, so it only ever moves forward. It comes from the sequence the total download reflects
+(GetAvailableFileDownloads metadata). If that is missing, it falls back to
+`DAF_RegisterImportStatus.lastSequenceNumber`, read before the download. The runner's printed result
+shows `checkpoint_seed` and `checkpoint_seed_source`. With the fallback, events between the file's
+generation and the run can be skipped, and the next weekly baseline repairs them.
+`cvr.events_poll` refuses to run while the checkpoint is 0 or `last_bulk_at` is NULL. It never walks
+the CVR event history from zero. It also skips any event whose row version is older than the stored
+`registrering_fra`.
+Check `last_sequence_number > 0` before setting `NORRIC_COUNTRY_BEATS=dk`.
