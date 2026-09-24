@@ -132,6 +132,32 @@ def get_available_file_downloads() -> list[dict[str, Any]]:
     return data if isinstance(data, list) else []
 
 
+def total_download_sequence(entity: str = "Virksomhed") -> Optional[int]:
+    """Register-import sequence number the latest total download reflects.
+
+    Read from GetAvailableFileDownloads metadata. The exact key is not pinned
+    in the public docs, so any key containing "sequence" (case-insensitive) on
+    the matching total-download entry is accepted. Returns None when absent;
+    callers fall back to DAF_RegisterImportStatus read before download.
+    """
+    best = None
+    for item in get_available_file_downloads():
+        if not isinstance(item, dict):
+            continue
+        blob = " ".join(str(v) for v in item.values()).lower()
+        if entity.lower() not in blob or "total" not in blob:
+            continue
+        for key, value in item.items():
+            if "sequence" in str(key).lower():
+                try:
+                    seq = int(value)
+                except (TypeError, ValueError):
+                    continue
+                if seq > 0 and (best is None or seq > best):
+                    best = seq
+    return best
+
+
 def download_latest_total(entity: str, dest_dir: Path,
                           temporal_type: str = "current",
                           fmt: str = "JSON") -> Path:
