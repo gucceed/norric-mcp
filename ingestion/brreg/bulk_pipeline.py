@@ -21,11 +21,13 @@ def diff_and_write(db,existing,record,run_date,source,run_id):
  return count
 def prepare(r,source):
  r['source']=source;r['raw_address']=json.dumps(r['raw_address'],ensure_ascii=False,default=str);r['raw']=json.dumps(r['raw'],ensure_ascii=False,default=str);return r
-def run_bulk_pipeline(dry_run=False):
+def run_bulk_pipeline(dry_run=False,pacer=None):
  db=Session()
  try:
   with pipeline_run(db,'brreg_bulk') as ctx:
-   run_id=ctx['run_id']; existing={r.org_number:r for r in db.execute(text(EXISTING_SQL)).fetchall()}; changes=0
+   run_id=ctx['run_id']
+   if pacer is not None and not dry_run:pacer.bind(db).start()
+   existing={r.org_number:r for r in db.execute(text(EXISTING_SQL)).fetchall()}; changes=0
    with tempfile.TemporaryDirectory() as tmp:
     path=client.download_entities(Path(tmp))
     for row in client.iter_download(path):
@@ -36,6 +38,8 @@ def run_bulk_pipeline(dry_run=False):
       changes+=diff_and_write(db,existing,rec,date.today(),'brreg_bulk',run_id);db.execute(text(UPSERT_SQL),rec)
       if rec['org_number'] in existing:ctx['rows_updated']+=1
       else:ctx['rows_inserted']+=1
+      if pacer is not None:pacer.tick()
+    if not dry_run and pacer is not None:pacer.finish()
     if not dry_run: db.execute(text("UPDATE norric_no_ingest_state SET last_bulk_at=now(),updated_at=now() WHERE id=1"));db.commit()
    return {**ctx,'run_id':str(run_id),'field_changes':changes}
  finally:db.close()
