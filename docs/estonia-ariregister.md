@@ -42,9 +42,10 @@ roles, shareholders or beneficial owners.
 ## Residency
 
 The only production upstream is `avaandmed.ariregister.rik.ee`; workers,
-storage, logs, cache and backups must remain in approved EU regions. No data
-load starts before the Stockholm database cutover. The migration and beat entry
-are inert until the approved general worker and database are explicitly updated.
+storage, logs, cache and backups must remain in approved EU regions. No Estonian data
+load has run yet. The Stockholm database cutover completed on 24 September
+2026. The migration and beat entry remain inert until the approved general
+worker and database are explicitly updated.
 
 ## Paid tools (wired in the follow-up build PR, not this prep branch)
 
