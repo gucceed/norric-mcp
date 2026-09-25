@@ -34,9 +34,9 @@ collect phone/email, people, roles or beneficial owners.
 ## Residency
 
 The only production upstream is `avoindata.prh.fi`; workers, storage, logs, cache
-and backups must remain in approved EU regions. No data load starts before the
-Stockholm database cutover. The migration and beat entry are inert until the
-approved general worker and database are explicitly updated.
+and backups must remain in approved EU regions. The Stockholm database cutover completed on 24 September 2026.
+The migration and beat entry remain inert until the approved general worker
+and database are explicitly updated; no Finnish data load has run yet.
 
 ## Paid tools
 

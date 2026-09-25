@@ -40,9 +40,9 @@ people, roles, financials or beneficial owners.
 Production upstreams are `static.data.gouv.fr` and
 `recherche-entreprises.api.gouv.fr` (both French state infrastructure);
 workers, storage, logs, cache and backups must remain in approved EU regions.
-No data load starts before the Stockholm database cutover. The migration and
-beat entry are inert until the approved general worker and database are
-explicitly updated.
+The Stockholm database cutover completed on 24 September
+2026. The migration and beat entry remain inert until the approved general
+worker and database are explicitly updated; no French data load has run yet.
 
 ## Paid tools (wired in the follow-up build PR, not this prep branch)
 

@@ -3,7 +3,7 @@
 **Service:** Norric MCP / Kreditvakt scoring API  
 **Host:** Railway (`https://norric-mcp-production.up.railway.app`)  
 **Frontend:** Vercel (`https://kreditvakt.com`)  
-**DB:** Supabase PostgreSQL (Frankfurt → `aws-1-us-east-1.pooler.supabase.com`)  
+**DB:** Supabase PostgreSQL (Stockholm region; cutover completed 24 Sep 2026, replacing the old Frankfurt→`aws-1-us-east-1.pooler.supabase.com` setup)  
 **Upstash Redis:** Frankfurt (rate limiting — `kreditvakt:rl` prefix)
 
 ---
