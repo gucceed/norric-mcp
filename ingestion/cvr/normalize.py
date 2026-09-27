@@ -11,9 +11,8 @@ Rules (docs/no-fabrication-contract.md applies):
   preserved in the `raw` column. Unknown structure degrades to nulls plus a
   warning at the pipeline level - never to an invented value.
 - Candidate key lists exist because the fildownload JSON field casing is
-  validated against the first real download (account/compliance spike,
-  see docs/denmark-cvr.md). Every candidate comes from the official
-  objekttypekatalog or the CVR GraphQL schema naming.
+  checked against the official CVR GraphQL schema. Validate against actual
+  Fildownload rows before a production metadata backfill.
 """
 from __future__ import annotations
 
@@ -97,7 +96,7 @@ def _ts(value: Any) -> Optional[str]:
 def map_virksomhed_row(row: dict, *, side: Optional[dict] = None) -> Optional[dict]:
     """Map one Virksomhed entity row (+ joined side-entity data) to a
     norric_dk_entities record. Returns None when the row carries no CVR
-    number (unusable). `side` holds per-CVR aggregates from the Navn,
+    number (unusable). `side` holds per-Virksomhed.id aggregates from the Navn,
     Adressering, Branche and Virksomhedsform entities built by the bulk
     pipeline: {name, address:{...}, industry:{...}, legal_form:{...}}.
     """
@@ -135,7 +134,7 @@ def map_virksomhed_row(row: dict, *, side: Optional[dict] = None) -> Optional[di
     country = address.get("country_code")
     raw_address = address.get("raw")
 
-    ceased = _date(_pick(row, "ophorsDato", "ophørsDato", "ophoersdato",
+    ceased = _date(_pick(row, "ophorsDato", "ophørsDato", "ophoersdato", "virksomhedOphoersdato",
                          "ophoersDato", "ceasedAt"))
     started = _date(_pick(row, "startDato", "startdato", "stiftelsesDato",
                         "virksomhedStartDato"))
@@ -179,70 +178,71 @@ def map_virksomhed_row(row: dict, *, side: Optional[dict] = None) -> Optional[di
 
 # ── Side-entity aggregation (bulk pipeline) ──────────────────────────────────
 
+def _entity_id(row: dict) -> Optional[str]:
+    """Datafordeler side entities link to Virksomhed.id, not CVRNummer."""
+    value = _pick(row, "CVREnhedsId")
+    return str(value) if value is not None and str(value).strip() else None
+
+
+def _latest_current(rows: list[dict], *, address: bool = False) -> Optional[dict]:
+    """Select a currently valid version; never resurrect a closed version."""
+    current = [r for r in rows
+               if not _pick(r, "registreringTil") and not _pick(r, "virkningTil")]
+    if address:
+        current = [r for r in current if str(_pick(r, "AdresseringAnvendelse") or "").lower()
+                   == "beliggenhedsadresse"]
+    if not current:
+        return None
+    return max(current, key=lambda r: (
+        str(_pick(r, "virkningFra") or ""),
+        str(_pick(r, "registreringFra") or ""),
+        int(_pick(r, "sekvens") or 0),
+    ))
+
+
 def build_side_index(entity: str, rows: list[dict]) -> dict[str, Any]:
-    """Aggregate one side entity's rows into per-CVR values.
+    """Aggregate current side entities keyed by Virksomhed.id/CVREnhedsId.
 
-    Only 'current' rows are used (registreringTil empty/null) when bitemporal
-    fields are present; otherwise the last row per CVR wins.
+    Field names follow the published CVR GraphQL schema, not synthetic flat
+    CVR-number fixtures. Unmatched rows are never fabricated into metadata.
     """
-    def cvr_of(r):
-        v = _pick(r, "cvrNummer", "cvrnummer", "CVRNummer", "virksomhedCVRNummer", "cvr")
-        if v is None:
-            return None
-        try:
-            return normalize_cvr_number(v)
-        except ValueError:
-            return None
-
-    def current(rows_):
-        open_rows = [r for r in rows_ if not _pick(r, "registreringTil", "registreringtil")]
-        return open_rows or rows_
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        entity_id = _entity_id(row)
+        if entity_id:
+            grouped.setdefault(entity_id, []).append(row)
 
     out: dict[str, Any] = {}
-    grouped: dict[str, list[dict]] = {}
-    for r in rows:
-        c = cvr_of(r)
-        if c:
-            grouped.setdefault(c, []).append(r)
-
-    for cvr, group in grouped.items():
-        rows_now = current(group)
-        latest = rows_now[-1]
+    for entity_id, group in grouped.items():
+        latest = _latest_current(group, address=(entity == "Adressering"))
+        if latest is None:
+            continue
         if entity == "Navn":
-            navn = _text(_pick(latest, "navn", "Navn", "tekst", "vaerdi", "værdi"))
-            if navn:
-                out.setdefault(cvr, {})["name"] = navn
-        elif entity == "Virksomhedsform":
-            code, label = _nested_code_label(
-                _pick(latest, "virksomhedsform", "virksomhedsformskode",
-                      "form", "kode") or latest)
-            if code or label:
-                out.setdefault(cvr, {})["legal_form"] = {"code": code, "label": label}
+            name = _text(_pick(latest, "vaerdi"))
+            if name:
+                out[entity_id] = {"name": name}
         elif entity == "Branche":
-            code, label = _nested_code_label(
-                _pick(latest, "branchekode", "branche", "kode") or latest)
+            code, label = _text(_pick(latest, "vaerdi")), _text(_pick(latest, "vaerdiTekst"))
             if code or label:
-                out.setdefault(cvr, {})["industry"] = {"code": code, "label": label}
+                out[entity_id] = {"industry": {"code": code, "label": label}}
+        elif entity == "Virksomhedsform":
+            code, label = _text(_pick(latest, "vaerdi")), _text(_pick(latest, "vaerdiTekst"))
+            if code or label:
+                out[entity_id] = {"legal_form": {"code": code, "label": label}}
         elif entity == "Adressering":
-            street_parts = [
-                _text(_pick(latest, "vejnavn", "gade")),
-                _text(_pick(latest, "husnummerFra", "husnummer", "nr")),
-                _text(_pick(latest, "etage")),
-                _text(_pick(latest, "sidedoer", "sidedør", "doer", "dør")),
-            ]
-            street = " ".join(p for p in street_parts if p) or None
-            postcode = _text(_pick(latest, "postnummer", "postnr"))
-            city = _text(_pick(latest, "postdistrikt", "bynavn", "city"))
-            municipality = _text(_pick(latest, "kommuneKode", "kommunekode",
-                                       "kommune", "municipalityCode"))
-            country = _text(_pick(latest, "landekode", "countryCode"))
+            street = " ".join(str(v) for v in (
+                _pick(latest, "CVRAdresse_vejnavn"),
+                _pick(latest, "CVRAdresse_husnummerFra"),
+                _pick(latest, "CVRAdresse_etagebetegnelse"),
+                _pick(latest, "CVRAdresse_doerbetegnelse"),
+            ) if v is not None and str(v).strip()) or None
+            postcode = _text(_pick(latest, "CVRAdresse_postnummer"))
+            city = _text(_pick(latest, "CVRAdresse_postdistrikt"))
             if any((street, postcode, city)):
-                out.setdefault(cvr, {})["address"] = {
-                    "street": street,
-                    "postcode": postcode,
-                    "city": city,
-                    "municipality_code": municipality,
-                    "country_code": country,
+                out[entity_id] = {"address": {
+                    "street": street, "postcode": postcode, "city": city,
+                    "municipality_code": _text(_pick(latest, "CVRAdresse_kommunekode")),
+                    "country_code": _text(_pick(latest, "CVRAdresse_landekode")),
                     "raw": latest,
-                }
+                }}
     return out
