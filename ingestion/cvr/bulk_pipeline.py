@@ -103,13 +103,13 @@ _CHANGE_SQL = """
 
 
 def _diff_and_write(db, existing: dict, record: dict, run_date: date,
-                    source: str, run_id) -> int:
+                    source: str, run_id, fields=_DIFF_FIELDS) -> int:
     cvr = record["cvr_number"]
     old = existing.get(cvr)
     if old is None:
         return 0
     changes = 0
-    for field in _DIFF_FIELDS:
+    for field in fields:
         old_v = getattr(old, field, None) if not isinstance(old, dict) else old.get(field)
         new_v = record.get(field)
         old_s = None if old_v is None else str(old_v)
@@ -182,7 +182,19 @@ def run_bulk_pipeline(dry_run: bool = False, pacer=None) -> dict:
                 # 2. Virksomhed spine
                 v_zip = client.download_latest_total("Virksomhed", tmp_path)
                 v_rows = client.extract_json_rows(v_zip)
-                log.info("cvr bulk: Virksomhed -> %d rows", len(v_rows))
+                if not v_rows:
+                    raise client.DatafordelerError("Virksomhed total file contained zero JSON rows")
+                company_ids = {str(row["id"]) for row in v_rows if row.get("id") is not None}
+                if len(company_ids) < len(v_rows) * 0.95:
+                    raise client.DatafordelerError("Virksomhed IDs missing from total file; refusing baseline")
+                matched_names = sum(bool(sides.get(str(row.get("id")), {}).get("name"))
+                                    for row in v_rows)
+                if matched_names < len(v_rows) * 0.90:
+                    raise client.DatafordelerError(
+                        f"Only {matched_names}/{len(v_rows)} Virksomhed rows matched a current Navn; "
+                        "refusing metadata-empty baseline")
+                log.info("cvr bulk: Virksomhed -> %d rows; matched names=%d",
+                         len(v_rows), matched_names)
                 ctx["rows_processed"] += len(v_rows)
 
                 existing = {
@@ -192,8 +204,7 @@ def run_bulk_pipeline(dry_run: bool = False, pacer=None) -> dict:
 
                 change_count = 0
                 for row in v_rows:
-                    record = map_virksomhed_row(row, side=sides.get(
-                        _safe_cvr(row), {}))
+                    record = map_virksomhed_row(row, side=sides.get(str(row.get("id")), {}))
                     if record is None:
                         ctx["rows_skipped"] += 1
                         continue
