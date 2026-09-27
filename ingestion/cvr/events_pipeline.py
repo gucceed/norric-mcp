@@ -33,6 +33,28 @@ from ingestion.cvr.normalize import map_virksomhed_row
 
 log = logging.getLogger(__name__)
 
+# A Virksomhed event does not carry separate Navn/Branche/Form/Adressering.
+# Update only fields that the event's source row can establish. The weekly
+# bulk baseline (or approved metadata backfill) owns side-derived columns.
+_EVENT_UPSERT_SQL = _UPSERT_SQL.split("ON CONFLICT (cvr_number) DO UPDATE SET")[0] + """
+    ON CONFLICT (cvr_number) DO UPDATE SET
+        status_code=EXCLUDED.status_code,
+        status_label=EXCLUDED.status_label,
+        is_active=EXCLUDED.is_active,
+        started_at=EXCLUDED.started_at,
+        ceased_at=EXCLUDED.ceased_at,
+        registrering_fra=EXCLUDED.registrering_fra,
+        registrering_til=EXCLUDED.registrering_til,
+        virkning_fra=EXCLUDED.virkning_fra,
+        virkning_til=EXCLUDED.virkning_til,
+        datafordeler_row_id=EXCLUDED.datafordeler_row_id,
+        source=EXCLUDED.source,
+        raw=EXCLUDED.raw,
+        last_seen_at=now(),
+        last_updated_at=now()
+"""
+_EVENT_DIFF_FIELDS = ("status_code", "is_active", "ceased_at")
+
 _EVENT_INSERT_SQL = """
     INSERT INTO norric_dk_events (
         event_id, entity_name, event_action, sequence_number, object_id,
@@ -139,8 +161,8 @@ def run_events_pipeline(batch_size: int = 1000) -> dict:
                             record["raw"] = json.dumps(record["raw"], ensure_ascii=False, default=str)
                             _diff_and_write(db, existing, record,
                                             date.fromisoformat(snap),
-                                            "cvr_events", run_id)
-                            db.execute(text(_UPSERT_SQL), record)
+                                            "cvr_events", run_id, fields=_EVENT_DIFF_FIELDS)
+                            db.execute(text(_EVENT_UPSERT_SQL), record)
                             if record["cvr_number"] in existing:
                                 ctx["rows_updated"] += 1
                             else:
