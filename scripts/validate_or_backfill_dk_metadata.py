@@ -161,6 +161,18 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         sides, counts = inspect_files(Path(tmp))
         if args.apply:
+            from sqlalchemy import text
+            from ingestion.db import Session
+            db = Session()
+            try:
+                present = db.execute(text("SELECT count(*) FROM norric_dk_entities")).scalar()
+                named = db.execute(text("SELECT count(*) FROM norric_dk_entities WHERE name IS NOT NULL AND name <> ''")).scalar()
+            finally:
+                db.close()
+            if present < len(sides) * 0.90:
+                p.error("DB row count differs from validated file; refusing backfill")
+            if named > 0:
+                p.error("DB already has names; this one-time repair refuses to overwrite metadata")
             print(json.dumps({"backfill_updated": backfill(
                 sides, counts, batch_size=args.batch_size,
                 pause_seconds=args.pause_seconds)}), flush=True)
