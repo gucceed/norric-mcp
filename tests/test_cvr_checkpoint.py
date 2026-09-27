@@ -104,7 +104,10 @@ def test_bulk_seeds_checkpoint_forward_only(monkeypatch, tmp_path):
         path.write_text("x")
         return path
     monkeypatch.setattr(bulk.client, "download_latest_total", fake_download)
-    monkeypatch.setattr(bulk.client, "extract_json_rows", lambda p: [])
+    monkeypatch.setattr(bulk.client, "extract_json_rows", lambda p:
+                        ([{"CVREnhedsId": "7788", "vaerdi": "Name"}]
+                         if p.stem == "Navn" else
+                         [{"id": "7788", "CVRNummer": 54562519}] if p.stem == "Virksomhed" else []))
     out = bulk.run_bulk_pipeline()
     assert order[0] == "seq"  # read before any file download
     (sql, params), = db.sql_matching("last_bulk_filename")
