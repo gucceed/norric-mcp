@@ -115,18 +115,17 @@ class TestMapVirksomhedRow:
     def test_side_index_fills_name_address_industry(self):
         from ingestion.cvr.normalize import build_side_index, map_virksomhed_row
         sides = {}
-        for cvr, values in build_side_index("Navn", [
-            {"cvrNummer": 54562519, "navn": "LEGO A/S"},
-        ]).items():
-            sides.setdefault(cvr, {}).update(values)
-        for cvr, values in build_side_index("Adressering", [
-            {"cvrNummer": 54562519, "vejnavn": "Aastvej", "husnummerFra": "1",
-             "postnummer": "7190", "postdistrikt": "Billund",
-             "kommuneKode": "530"},
-        ]).items():
-            sides.setdefault(cvr, {}).update(values)
-        rec = map_virksomhed_row({"cvrNummer": 54562519},
-                                 side=sides.get("54562519", {}))
+        for entity, rows in (
+            ("Navn", [{"CVREnhedsId": "7788", "vaerdi": "LEGO A/S"}]),
+            ("Adressering", [{"CVREnhedsId": "7788", "AdresseringAnvendelse": "beliggenhedsadresse",
+                             "CVRAdresse_vejnavn": "Aastvej", "CVRAdresse_husnummerFra": "1",
+                             "CVRAdresse_postnummer": "7190", "CVRAdresse_postdistrikt": "Billund",
+                             "CVRAdresse_kommunekode": "530"}]),
+        ):
+            for entity_id, values in build_side_index(entity, rows).items():
+                sides.setdefault(entity_id, {}).update(values)
+        rec = map_virksomhed_row({"id": "7788", "CVRNummer": 54562519},
+                                 side=sides.get("7788", {}))
         assert rec["name"] == "LEGO A/S"
         assert rec["street"] == "Aastvej 1"
         assert rec["postcode"] == "7190"
@@ -136,8 +135,8 @@ class TestMapVirksomhedRow:
     def test_side_index_uses_current_rows_only(self):
         from ingestion.cvr.normalize import build_side_index
         out = build_side_index("Navn", [
-            {"cvrNummer": 54562519, "navn": "Gamle Navn ApS",
+            {"CVREnhedsId": "7788", "vaerdi": "Gamle Navn ApS",
              "registreringTil": "2020-01-01T00:00:00+01:00"},
-            {"cvrNummer": 54562519, "navn": "Nye Navn ApS"},
+            {"CVREnhedsId": "7788", "vaerdi": "Nye Navn ApS"},
         ])
-        assert out["54562519"]["name"] == "Nye Navn ApS"
+        assert out["7788"]["name"] == "Nye Navn ApS"
