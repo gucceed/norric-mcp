@@ -14,7 +14,7 @@ def verify_company(db,query):
  q=(query or '').strip()
  if not q:raise ValueError('query must be a 9-digit organisation number or company name')
  warnings=[]
- if re.fullmatch(r'[\\d -]{9,12}',q):org=normalize_org_number(q);e=db.execute(text(ENTITY),{'org':org}).fetchone()
+ if re.fullmatch(r'[\d -]{9,12}',q):org=normalize_org_number(q);e=db.execute(text(ENTITY),{'org':org}).fetchone()
  else:
   rows=list(db.execute(text(NAME),{'pattern':f'%{q}%'}))
   if len(rows)>1:return {'data':{'query':q,'found':False,'match':'ambiguous','verified':None,'candidates':[{'org_number':r.org_number,'name':r.name,'is_active':r.is_active} for r in rows]},'sources':['brreg'],'confidence':.3,'signals':[],'warnings':['ambiguous name match - retry with the organisation number']}

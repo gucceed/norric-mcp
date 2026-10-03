@@ -18,3 +18,44 @@ def test_exact_verify():
  d=verify_company(DB(entity()),'923609016');assert d['data']['verified'];assert d['data']['identity']['org_number']=='923609016';assert d['data']['evidence']['license'].startswith('NLOD')
 def test_not_found_honest():
  d=verify_company(DB(),'923609016');assert d['data']['found'] is False
+
+import pytest
+
+class RoutedDB(DB):
+ """Model ID lookup and name lookup separately, unlike the old catch-all fake."""
+ def __init__(self, e=None):
+  super().__init__(e)
+  self.calls=[]
+ def execute(self,stmt,params=None):
+  self.calls.append((str(stmt),params))
+  if 'norric_no_entities' in str(stmt):
+   if 'WHERE org_number = ' in str(stmt) or 'WHERE org_number=' in str(stmt):
+    return R([self.e] if self.e and params['org']==self.e.org_number else [])
+   if 'WHERE name ILIKE' in str(stmt):
+    term=params['pattern'].strip('%').lower()
+    return R([self.e] if self.e and term in self.e.name.lower() else [])
+   raise AssertionError('unexpected entity query')
+  return super().execute(stmt,params)
+
+@pytest.mark.parametrize('query', ['923609016','923 609 016','923-609-016',' 923609016 '])
+def test_org_number_routes_directly_to_id_lookup(query):
+ db=RoutedDB(entity())
+ result=verify_company(db,query)
+ assert result['data']['found'] is True
+ assert result['data']['identity']['org_number']=='923609016'
+ assert db.calls[0][1]=={'org':'923609016'}
+ assert not any('WHERE name ILIKE' in sql for sql,_ in db.calls)
+
+def test_name_search_still_routes_by_name():
+ db=RoutedDB(entity())
+ assert verify_company(db,'EQUINOR')['data']['found'] is True
+ assert db.calls[0][1]=={'pattern':'%EQUINOR%'}
+
+@pytest.mark.parametrize('query', ['923609017','000000000'])
+def test_missing_number_is_honest_and_does_not_search_names(query):
+ db=RoutedDB(entity())
+ result=verify_company(db,query)
+ assert result['data']['found'] is False
+ assert result['data']['org_number']==query
+ assert db.calls[0][1]=={'org':query}
+ assert not any('WHERE name ILIKE' in sql for sql,_ in db.calls)
