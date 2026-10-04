@@ -395,6 +395,28 @@ async def norric_data_freshness_v1(
     # Fetch freshness data from DB
     raw_records = _get_pipeline_freshness_from_db(agencies)
 
+    # provenance_records only covers sources that write provenance rows. Fill the
+    # rest from norric_pipeline_runs (the source /health and norric_status_v1 use),
+    # so freshness cannot report "no data" for a source that is ingesting.
+    from core.pipeline_status import load_agency_status
+    run_status = load_agency_status() or {}
+    have = {r["source_agency"] for r in raw_records}
+    for agency_id, rec in run_status.items():
+        if agency_id in have:
+            continue
+        if agencies and agency_id not in agencies:
+            continue
+        ls = rec["last_success"]
+        if ls.tzinfo is None:
+            ls = ls.replace(tzinfo=timezone.utc)
+        raw_records.append({
+            "source_agency": agency_id,
+            "last_ingestion": ls,
+            "first_ingestion": ls,
+            "record_count": 0,  # run-based: successful runs, not provenance rows
+            "from_pipeline_runs": True,
+        })
+
     # Filter by requested agencies
     target_agencies = agencies or list(AGENCY_REGISTRY.keys())
     checked_at = datetime.now(timezone.utc)
@@ -446,6 +468,7 @@ async def norric_data_freshness_v1(
             "last_ingestion": last_ingestion.isoformat() if last_ingestion else None,
             "age_days": age_days,
             "record_count": record_count,
+            "basis": "pipeline_runs" if db_record and db_record.get("from_pipeline_runs") else "provenance_records",
             "stale_threshold_days": stale_threshold,
             "is_stale": is_stale,
             "status": "🔴 STALE" if is_stale else "🟢 HEALTHY",
