@@ -1773,6 +1773,33 @@ async def norric_company_profile(
     )
 
 
+def _data_sources_status() -> dict:
+    """Live per-source ingestion status from norric_pipeline_runs (same source as /health)."""
+    from core.pipeline_status import load_agency_status, age_days
+    from shared.schemas.agency import get_stale_days
+
+    status = load_agency_status()
+    out = {}
+    for agency in ("skatteverket", "bolagsverket", "boverket", "scb", "ivo", "kronofogden"):
+        if status is None:
+            out[agency] = {"live": None, "note": "Status unavailable: pipeline run history could not be read."}
+            continue
+        rec = status.get(agency)
+        if rec is None:
+            out[agency] = {"live": False, "last_success": None,
+                           "note": "No successful ingestion run recorded for this source."}
+            continue
+        age = age_days(rec["last_success"])
+        fresh = age <= get_stale_days(agency)
+        out[agency] = {
+            "live": fresh,
+            "last_success": rec["last_success"].isoformat(),
+            "age_days": age,
+            "note": "Ingesting within its freshness window." if fresh else "Last successful run is older than the freshness window.",
+        }
+    return out
+
+
 @mcp.tool(
     name="norric_status_v1",
     description=(
@@ -1827,14 +1854,11 @@ async def norric_status() -> dict:
                     "note": "Web UI live. BRF data pipeline to connect.",
                 },
             },
-            "data_sources": {
-                "skatteverket": {"live": False, "note": "API keys obtained. Ingestion to deploy."},
-                "bolagsverket": {"live": False, "note": "API v2 (free). Ingestion to deploy."},
-                "boverket":     {"live": False, "note": "BankID contract needed."},
-                "scb":          {"live": False, "note": "Free open data. Pipeline to build."},
-                "ivo":          {"live": False, "note": "Decision database. Scraper to build."},
-                "kronofogden":  {"live": False, "note": "Public data. Scraper to build."},
-            },
+            "data_sources": _data_sources_status(),
+            "data_sources_note": (
+                "Per-source status is derived from norric_pipeline_runs, the same "
+                "source as /health. 'products' entries are static descriptions."
+            ),
         },
     )
 
