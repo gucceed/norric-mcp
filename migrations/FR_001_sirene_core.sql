@@ -19,3 +19,23 @@ CREATE INDEX IF NOT EXISTS idx_fr_changes_entity ON norric_fr_field_changes(enti
 CREATE INDEX IF NOT EXISTS idx_fr_changes_date ON norric_fr_field_changes(snapshot_date DESC);
 CREATE TABLE IF NOT EXISTS norric_fr_ingest_state(id smallint PRIMARY KEY DEFAULT 1 CHECK(id=1),last_bulk_at timestamptz,updated_at timestamptz NOT NULL DEFAULT now());
 INSERT INTO norric_fr_ingest_state(id) VALUES(1) ON CONFLICT(id) DO NOTHING;
+
+-- Lock Data API surface: runtime reads use direct PostgreSQL DATABASE_URL
+-- connections (same pattern as T4_001). Explicit grants are required for any
+-- table created from Oct 30, 2026 - Supabase no longer auto-grants Data API
+-- access to new tables in "public".
+alter table public.norric_fr_entities enable row level security;
+alter table public.norric_fr_field_changes enable row level security;
+alter table public.norric_fr_ingest_state enable row level security;
+
+revoke all privileges on table
+  public.norric_fr_entities,
+  public.norric_fr_field_changes,
+  public.norric_fr_ingest_state
+from anon, authenticated;
+
+grant select, insert, update, delete on table
+  public.norric_fr_entities,
+  public.norric_fr_field_changes,
+  public.norric_fr_ingest_state
+to service_role;
